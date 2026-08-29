@@ -1,0 +1,1130 @@
+import { useState, useMemo } from "react";
+import {
+  Camera, Mic, Lightbulb, Plus, X, Check, AlertTriangle,
+  Package, Users, ClipboardList, LayoutGrid, ChevronDown,
+  Trash2, Calendar, Clock, Search, Folder, CalendarDays,
+  Battery, Triangle, Joystick, Aperture, Rows3, StickyNote
+} from "lucide-react";
+
+const MESI_IT = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
+const GIORNI_IT = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
+const EVENT_PALETTE = [
+  "#E1523D", "#F2A93B", "#D9C24E", "#8FB93F", "#3FB6A8", "#3E9BD6",
+  "#7C7FE8", "#B168D6", "#E0629E", "#E88A5A", "#5FA8E0", "#6FB07A",
+  "#C9645A", "#9AA85E", "#5B9EA6", "#A87FD1",
+];
+/* Colore stabile per evento (stesso colore in Calendario e nella card
+   dell'evento), calcolato dall'id — non dipende dall'ordine dell'elenco */
+function getEventColor(eventId) {
+  let hash = 0;
+  for (let i = 0; i < eventId.length; i++) hash = (hash * 31 + eventId.charCodeAt(i)) >>> 0;
+  return EVENT_PALETTE[hash % EVENT_PALETTE.length];
+}
+
+/* ---------------------------------------------------------
+   TOKENS — "sala regia": tavolo di regia, gaffer tape, tally light
+--------------------------------------------------------- */
+const TOKENS = {
+  bg: "#17191A",
+  panel: "#1F2224",
+  panelRaised: "#262A2C",
+  line: "#33383A",
+  amber: "#F2A93B",
+  teal: "#3FB6A8",
+  red: "#E1523D",
+  text: "#EDEAE3",
+  textMute: "#9AA0A3",
+};
+
+const CATEGORY_META = {
+  camera: { label: "Videocamera", icon: Camera, color: TOKENS.amber },
+  microfono: { label: "Microfono", icon: Mic, color: TOKENS.teal },
+  luce: { label: "Luce", icon: Lightbulb, color: "#D9C24E" },
+  batterie: { label: "Batterie", icon: Battery, color: "#8FB93F" },
+  cavalletti: { label: "Cavalletti", icon: Triangle, color: "#8A97A6" },
+  ronin: { label: "Ronin", icon: Joystick, color: "#B168D6" },
+  obiettivi: { label: "Obiettivi", icon: Aperture, color: "#5FA8E0" },
+  vario: { label: "Vario", icon: Package, color: "#C9645A" },
+};
+
+const STATUS_META = {
+  disponibile: { label: "Disponibile", color: TOKENS.teal },
+  assegnato: { label: "In uso ora", color: TOKENS.amber },
+  manutenzione: { label: "Manutenzione", color: TOKENS.red },
+};
+
+/* ---------------------------------------------------------
+   DATI DI ESEMPIO (in memoria — nessun salvataggio reale)
+   item.status: solo "disponibile" | "manutenzione" (manuale).
+   Lo stato "in uso ora" è calcolato dalle date/orari degli eventi.
+--------------------------------------------------------- */
+const INITIAL_ITEMS = [
+  { id: "CAM-014", name: "Sony FX6", category: "camera", status: "disponibile", note: "" },
+  { id: "CAM-015", name: "Sony FX6", category: "camera", status: "disponibile", note: "" },
+  { id: "CAM-021", name: "Canon C70", category: "camera", status: "manutenzione", note: "Sensore da pulire, in officina" },
+  { id: "MIC-003", name: "Rode NTG5", category: "microfono", status: "disponibile", note: "" },
+  { id: "MIC-007", name: "Sennheiser G4", category: "microfono", status: "disponibile", note: "" },
+  { id: "MIC-011", name: "Zoom H6", category: "microfono", status: "disponibile", note: "" },
+  { id: "LUC-002", name: "Aputure 300D", category: "luce", status: "disponibile", note: "" },
+  { id: "LUC-006", name: "Aputure 300D", category: "luce", status: "disponibile", note: "" },
+  { id: "LUC-009", name: "Nanlite Pavotube", category: "luce", status: "disponibile", note: "" },
+];
+
+const INITIAL_CAMERAMEN = [
+  { id: "cm-1", name: "Marco Rossi" },
+  { id: "cm-2", name: "Giulia Bianchi" },
+  { id: "cm-3", name: "Luca Ferrari" },
+];
+
+const INITIAL_EVENTS = [
+  { id: "ev-1", name: "Matrimonio Villa Erba", cameramanId: "cm-1", fromDate: "2026-08-29", fromTime: "09:00", toDate: "2026-08-29", toTime: "23:00" },
+  { id: "ev-2", name: "Intervista aziendale", cameramanId: "cm-2", fromDate: "2026-08-29", fromTime: "14:00", toDate: "2026-08-29", toTime: "16:00" },
+];
+
+const INITIAL_ASSIGNMENTS = [
+  { id: "a1", itemId: "CAM-015", eventId: "ev-1" },
+  { id: "a2", itemId: "MIC-007", eventId: "ev-1" },
+  { id: "a3", itemId: "LUC-002", eventId: "ev-2" },
+];
+
+/* ---------------------------------------------------------
+   HELPER — date/orari e sovrapposizioni
+--------------------------------------------------------- */
+function toDateTime(dateStr, timeStr, fallback) {
+  if (!dateStr) return null;
+  return new Date(`${dateStr}T${timeStr || fallback}`);
+}
+function eventRange(ev) {
+  return {
+    from: toDateTime(ev.fromDate, ev.fromTime, "00:00"),
+    to: toDateTime(ev.toDate || ev.fromDate, ev.toTime, "23:59"),
+  };
+}
+function rangesOverlap(aFrom, aTo, bFrom, bTo) {
+  if (!aFrom || !aTo || !bFrom || !bTo) return false;
+  return aFrom <= bTo && bFrom <= aTo;
+}
+function formatEventWhen(ev) {
+  const sameDay = ev.toDate === ev.fromDate || !ev.toDate;
+  if (sameDay) {
+    return `${ev.fromDate}${ev.fromTime ? ` · ${ev.fromTime}` : ""}${ev.toTime ? ` → ${ev.toTime}` : ""}`;
+  }
+  return `${ev.fromDate}${ev.fromTime ? ` ${ev.fromTime}` : ""} → ${ev.toDate}${ev.toTime ? ` ${ev.toTime}` : ""}`;
+}
+
+function dateOnly(d) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+function sameDate(a, b) {
+  return a.getTime() === b.getTime();
+}
+/* Costruisce le settimane (lun-dom) necessarie a coprire un mese, incluse
+   le code dei mesi adiacenti, come nella vista mensile di Google Calendar */
+function getMonthMatrix(year, month) {
+  const firstOfMonth = new Date(year, month, 1);
+  const lastOfMonth = new Date(year, month + 1, 0);
+  const startWeekday = (firstOfMonth.getDay() + 6) % 7; // 0 = lunedì
+  const cursor = new Date(year, month, 1 - startWeekday);
+  const weeks = [];
+  while (true) {
+    const week = [];
+    for (let d = 0; d < 7; d++) {
+      week.push(new Date(cursor));
+      cursor.setDate(cursor.getDate() + 1);
+    }
+    weeks.push(week);
+    if (cursor > lastOfMonth) break;
+  }
+  return weeks;
+}
+/* Individua tutti i mesi (anno+mese) attraversati da almeno un evento */
+function getMonthsWithEvents(events) {
+  const set = new Map();
+  events.forEach((ev) => {
+    if (!ev.fromDate) return;
+    const from = dateOnly(new Date(`${ev.fromDate}T00:00`));
+    const to = dateOnly(new Date(`${ev.toDate || ev.fromDate}T00:00`));
+    const cursor = new Date(from.getFullYear(), from.getMonth(), 1);
+    const last = new Date(to.getFullYear(), to.getMonth(), 1);
+    while (cursor <= last) {
+      const key = `${cursor.getFullYear()}-${cursor.getMonth()}`;
+      set.set(key, { year: cursor.getFullYear(), month: cursor.getMonth() });
+      cursor.setMonth(cursor.getMonth() + 1);
+    }
+  });
+  return Array.from(set.values()).sort((a, b) => a.year - b.year || a.month - b.month);
+}
+/* Per ogni settimana calcola le "barre" evento (con eventuale accatastamento
+   su più righe se più eventi si sovrappongono negli stessi giorni) */
+function computeWeekBars(week, events, cameramanName) {
+  const weekStart = dateOnly(week[0]);
+  const weekEnd = dateOnly(week[6]);
+  const overlapping = events
+    .filter((ev) => ev.fromDate)
+    .map((ev) => {
+      const evFrom = dateOnly(new Date(`${ev.fromDate}T00:00`));
+      const evTo = dateOnly(new Date(`${ev.toDate || ev.fromDate}T00:00`));
+      const start = evFrom > weekStart ? evFrom : weekStart;
+      const end = evTo < weekEnd ? evTo : weekEnd;
+      if (start > end) return null;
+      const startCol = week.findIndex((d) => sameDate(dateOnly(d), start));
+      const endCol = week.findIndex((d) => sameDate(dateOnly(d), end));
+      return {
+        event: ev,
+        startCol,
+        endCol,
+        continuesBefore: evFrom < weekStart,
+        continuesAfter: evTo > weekEnd,
+        cameraman: cameramanName(ev.cameramanId),
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.startCol - b.startCol);
+
+  const rowEnds = [];
+  const bars = overlapping.map((bar) => {
+    let rowIndex = rowEnds.findIndex((end) => end < bar.startCol);
+    if (rowIndex === -1) {
+      rowIndex = rowEnds.length;
+      rowEnds.push(bar.endCol);
+    } else {
+      rowEnds[rowIndex] = bar.endCol;
+    }
+    return { ...bar, rowIndex };
+  });
+  return bars;
+}
+
+/* Singola barra evento nel calendario: colore proprio + tooltip al passaggio
+   del mouse con l'elenco del materiale prenotato per quell'evento */
+function EventBar({ bar, style, materialForEvent }) {
+  const [hover, setHover] = useState(false);
+  const color = getEventColor(bar.event.id);
+  const material = materialForEvent(bar.event.id);
+
+  return (
+    <div style={{ minWidth: 0, minHeight: 0, ...style, position: "relative" }} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}>
+      <div
+        style={{
+          background: `${color}CC`,
+          color: "#161616",
+          fontSize: 16,
+          fontWeight: 700,
+          padding: "1px 6px",
+          height: "100%",
+          borderTopLeftRadius: bar.continuesBefore ? 0 : 4,
+          borderBottomLeftRadius: bar.continuesBefore ? 0 : 4,
+          borderTopRightRadius: bar.continuesAfter ? 0 : 4,
+          borderBottomRightRadius: bar.continuesAfter ? 0 : 4,
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          cursor: "default",
+        }}
+      >
+        {bar.event.name} · {bar.cameraman}
+      </div>
+
+      {hover && (
+        <div
+          style={{
+            position: "absolute", top: "100%", left: 0, marginTop: 4, zIndex: 50,
+            background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`,
+            borderRadius: 7, padding: "10px 12px", minWidth: 190,
+            boxShadow: "0 10px 26px rgba(0,0,0,0.45)",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+            <div style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
+            <div style={{ fontWeight: 700, fontSize: 18 }}>{bar.event.name}</div>
+          </div>
+          <div style={{ fontSize: 15, color: TOKENS.textMute, marginBottom: 7 }}>{bar.cameraman}</div>
+          {material.length === 0 ? (
+            <div style={{ fontSize: 15, color: TOKENS.textMute }}>Nessun materiale assegnato.</div>
+          ) : (
+            <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "flex", flexDirection: "column", gap: 3 }}>
+              {material.map(({ item }) => (
+                <li key={item.id} style={{ fontSize: 15, display: "flex", gap: 6 }}>
+                  <span style={{ fontFamily: "ui-monospace, monospace", color: TOKENS.textMute, fontSize: 13 }}>{item.id}</span>
+                  <span>{item.name}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Vista mensile di sola visualizzazione, in stile Google Calendar:
+   ogni evento ha un colore proprio (non più uno fisso per mese) così
+   gli eventi che si susseguono o si sovrappongono si distinguono a colpo
+   d'occhio; al passaggio del mouse mostra il materiale prenotato. */
+function MonthCalendar({ year, month, events, cameramanName, materialForEvent }) {
+  const weeks = getMonthMatrix(year, month);
+
+  return (
+    <div style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: 16, marginBottom: 18 }}>
+      <div style={{ fontSize: 26, fontWeight: 800, marginBottom: 12 }}>{MESI_IT[month]} {year}</div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 4 }}>
+        {GIORNI_IT.map((g) => (
+          <div key={g} style={{ fontSize: 16, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", padding: "2px 0" }}>
+            {g}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+        {weeks.map((week, wi) => {
+          const bars = computeWeekBars(week, events, cameramanName);
+          const maxRow = bars.reduce((m, b) => Math.max(m, b.rowIndex), -1);
+          return (
+            <div
+              key={wi}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(7, 1fr)",
+                gridTemplateRows: maxRow >= 0 ? `20px repeat(${maxRow + 1}, 19px)` : "20px",
+                gap: 3,
+                position: "relative",
+                background: TOKENS.panelRaised,
+                borderRadius: 5,
+                padding: 4,
+              }}
+            >
+              {week.map((day, di) => (
+                <div
+                  key={di}
+                  style={{
+                    gridColumn: di + 1,
+                    gridRow: 1,
+                    minWidth: 0,
+                    fontSize: 16,
+                    color: day.getMonth() === month ? TOKENS.textMute : "#55595B",
+                    fontWeight: day.getMonth() === month ? 700 : 400,
+                    textAlign: "right",
+                    paddingRight: 3,
+                  }}
+                >
+                  {day.getDate()}
+                </div>
+              ))}
+              {bars.map((bar, bi) => (
+                <EventBar
+                  key={bi}
+                  bar={bar}
+                  materialForEvent={materialForEvent}
+                  style={{ gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`, gridRow: bar.rowIndex + 2 }}
+                />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   PICCOLI COMPONENTI (tutti a livello di modulo — MAI ridefiniti
+   dentro App, altrimenti perdono lo stato/focus ad ogni render)
+--------------------------------------------------------- */
+function Tag({ color, children }) {
+  return (
+    <span
+      style={{
+        display: "inline-flex", alignItems: "center", gap: 6,
+        padding: "3px 9px", borderRadius: 3, fontSize: 16, fontWeight: 600,
+        letterSpacing: "0.04em", textTransform: "uppercase", color,
+        border: `1px solid ${color}55`, background: `${color}14`,
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function GearChip({ item, onRemove }) {
+  const meta = CATEGORY_META[item.category];
+  const Icon = meta.icon;
+  return (
+    <div
+      style={{
+        display: "flex", alignItems: "center", gap: 7,
+        background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`,
+        borderLeft: `3px solid ${meta.color}`, borderRadius: 5,
+        padding: "6px 8px 6px 10px", fontSize: 17.5,
+      }}
+    >
+      <Icon size={13} color={meta.color} strokeWidth={2} />
+      <span style={{ fontFamily: "ui-monospace, monospace", color: TOKENS.textMute, fontSize: 16 }}>{item.id}</span>
+      <span style={{ fontWeight: 600 }}>{item.name}</span>
+      {onRemove && (
+        <button onClick={onRemove} title="Rimuovi dall'evento" style={{ background: "transparent", border: "none", color: TOKENS.textMute, cursor: "pointer", padding: 2, display: "flex" }}>
+          <X size={12} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function GearTag({ item, status }) {
+  const meta = CATEGORY_META[item.category];
+  const statusMeta = STATUS_META[status];
+  const Icon = meta.icon;
+  return (
+    <div style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderLeft: `3px solid ${meta.color}`, borderRadius: 4, padding: "12px 14px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontFamily: "ui-monospace, monospace", fontSize: 17, letterSpacing: "0.08em", color: TOKENS.textMute }}>{item.id}</div>
+          <div style={{ fontSize: 20, fontWeight: 600, color: TOKENS.text, marginTop: 2 }}>{item.name}</div>
+        </div>
+        <Icon size={18} color={meta.color} strokeWidth={1.75} />
+      </div>
+      <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <Tag color={statusMeta.color}>{statusMeta.label}</Tag>
+        <Tag color={TOKENS.textMute}>{meta.label}</Tag>
+      </div>
+      {item.note && (
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 5, marginTop: 9, padding: "6px 8px", background: `${TOKENS.amber}14`, border: `1px solid ${TOKENS.amber}40`, borderRadius: 5 }}>
+          <StickyNote size={13} color={TOKENS.amber} style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ fontSize: 14, color: TOKENS.text, lineHeight: 1.3 }}>{item.note}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoleSwitcher({ role, setRole, cameramanId, setCameramanId, cameramen }) {
+  return (
+    <div style={{ display: "flex", gap: 4, background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: 4, alignItems: "center" }}>
+      {["responsabile", "cameraman"].map((r) => (
+        <button
+          key={r}
+          onClick={() => setRole(r)}
+          style={{
+            padding: "7px 14px", borderRadius: 6, border: "none", fontSize: 18, fontWeight: 600,
+            textTransform: "capitalize", cursor: "pointer",
+            background: role === r ? TOKENS.amber : "transparent",
+            color: role === r ? "#1A1A1A" : TOKENS.textMute, transition: "all .15s",
+          }}
+        >
+          {r}
+        </button>
+      ))}
+      {role === "cameraman" && cameramen.length > 0 && (
+        <div style={{ position: "relative", marginLeft: 4 }}>
+          <select
+            value={cameramanId}
+            onChange={(e) => setCameramanId(e.target.value)}
+            style={{ appearance: "none", background: TOKENS.panelRaised, color: TOKENS.text, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "7px 28px 7px 10px", fontSize: 18, cursor: "pointer" }}
+          >
+            {cameramen.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+          </select>
+          <ChevronDown size={14} color={TOKENS.textMute} style={{ position: "absolute", right: 8, top: 9, pointerEvents: "none" }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NavButton({ active, onClick, icon: Icon, label }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px",
+        borderRadius: 6, border: "none", background: active ? TOKENS.panelRaised : "transparent",
+        color: active ? TOKENS.amber : TOKENS.textMute, fontSize: 18.5, fontWeight: 600,
+        cursor: "pointer", textAlign: "left",
+        borderLeft: active ? `3px solid ${TOKENS.amber}` : "3px solid transparent",
+      }}
+    >
+      <Icon size={16} strokeWidth={2} />
+      {label}
+    </button>
+  );
+}
+
+/* Card che rappresenta un evento con tutto il materiale accorpato */
+function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddItem, onRemoveItem, onDeleteEvent, readOnly }) {
+  const [adding, setAdding] = useState(false);
+  const [pick, setPick] = useState("");
+  const color = getEventColor(event.id);
+
+  return (
+    <div style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderLeft: `4px solid ${color}`, borderRadius: 8, padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 11, height: 11, borderRadius: 3, background: color, flexShrink: 0 }} title="Colore evento nel calendario" />
+            <span style={{ fontSize: 20, fontWeight: 700 }}>{event.name}</span>
+          </div>
+          <div style={{ fontSize: 17, color: TOKENS.textMute, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+            {cameramanLabel && <span>{cameramanLabel}</span>}
+            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <Calendar size={12} /> {formatEventWhen(event)}
+            </span>
+          </div>
+        </div>
+        {!readOnly && onDeleteEvent && (
+          <button onClick={() => onDeleteEvent(event.id)} title="Elimina evento e libera il materiale" style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, borderRadius: 5, color: TOKENS.red, padding: "5px 8px", cursor: "pointer" }}>
+            <Trash2 size={13} />
+          </button>
+        )}
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+        {items.length === 0 && <span style={{ fontSize: 17.5, color: TOKENS.textMute }}>Nessun materiale in questo evento.</span>}
+        {items.map(({ assignment, item }) => (
+          <GearChip key={assignment.id} item={item} onRemove={readOnly ? null : () => onRemoveItem(assignment.id)} />
+        ))}
+      </div>
+
+      {!readOnly && onAddItem && (
+        <div style={{ marginTop: 12 }}>
+          {!adding ? (
+            <button onClick={() => setAdding(true)} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: `1px dashed ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 6, padding: "6px 10px", fontSize: 17, cursor: "pointer" }}>
+              <Plus size={12} /> Aggiungi materiale a questo evento
+            </button>
+          ) : (
+            <div style={{ display: "flex", gap: 6 }}>
+              <select value={pick} onChange={(e) => setPick(e.target.value)} style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "6px 8px", color: TOKENS.text, fontSize: 17.5, flex: 1 }}>
+                <option value="">Materiale libero in queste date…</option>
+                {availableForThisEvent.map((i) => (<option key={i.id} value={i.id}>{i.id} — {i.name}</option>))}
+              </select>
+              <button onClick={() => { if (pick) { onAddItem(event.id, pick); setPick(""); setAdding(false); } }} style={{ background: TOKENS.amber, color: "#1A1A1A", border: "none", borderRadius: 6, padding: "6px 10px", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>
+                Aggiungi
+              </button>
+              <button onClick={() => { setAdding(false); setPick(""); }} style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 6, padding: "6px 8px", fontSize: 17, cursor: "pointer" }}>
+                Annulla
+              </button>
+              {availableForThisEvent.length === 0 && (
+                <div style={{ fontSize: 16.5, color: TOKENS.red, alignSelf: "center" }}>Nessun materiale libero per queste date/orari.</div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* Form "assegna materiale a un evento" — componente stabile a livello di modulo:
+   definirlo dentro App ne causava la ricreazione ad ogni render, con perdita del
+   focus sugli input a ogni tasto premuto e chiusura dei date-picker nativi. */
+function EventAssignForm({ forCameramanId, eventsPool, cameramen, cameramanName, eventForm, setEventForm, emptyEventForm, getAvailableItems, onSubmit }) {
+  const showCameramanPicker = !forCameramanId;
+  const selectedExistingEvent = eventForm.mode === "existing" ? eventsPool.find((e) => e.id === eventForm.eventId) : null;
+
+  const availableItems =
+    eventForm.mode === "existing"
+      ? selectedExistingEvent
+        ? getAvailableItems(selectedExistingEvent.fromDate, selectedExistingEvent.fromTime, selectedExistingEvent.toDate, selectedExistingEvent.toTime, selectedExistingEvent.id)
+        : []
+      : getAvailableItems(eventForm.fromDate, eventForm.fromTime, eventForm.toDate, eventForm.toTime, null);
+
+  return (
+    <div style={{ background: TOKENS.panel, border: `1px dashed ${TOKENS.line}`, borderRadius: 8, padding: 14, marginBottom: 20 }}>
+      <div style={{ fontSize: 17.5, fontWeight: 700, color: TOKENS.textMute, marginBottom: 10, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+        Assegna materiale a un evento
+      </div>
+
+      <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+        <button
+          onClick={() => setEventForm({ ...emptyEventForm, mode: "new" })}
+          style={{
+            padding: "5px 12px", borderRadius: 6, fontSize: 17, fontWeight: 600, cursor: "pointer",
+            border: `1px solid ${eventForm.mode === "new" ? TOKENS.amber : TOKENS.line}`,
+            background: eventForm.mode === "new" ? `${TOKENS.amber}1A` : "transparent",
+            color: eventForm.mode === "new" ? TOKENS.amber : TOKENS.textMute,
+          }}
+        >
+          Nuovo evento
+        </button>
+        <button
+          onClick={() => setEventForm({ ...emptyEventForm, mode: "existing" })}
+          disabled={eventsPool.length === 0}
+          style={{
+            padding: "5px 12px", borderRadius: 6, fontSize: 17, fontWeight: 600,
+            cursor: eventsPool.length === 0 ? "not-allowed" : "pointer",
+            opacity: eventsPool.length === 0 ? 0.5 : 1,
+            border: `1px solid ${eventForm.mode === "existing" ? TOKENS.amber : TOKENS.line}`,
+            background: eventForm.mode === "existing" ? `${TOKENS.amber}1A` : "transparent",
+            color: eventForm.mode === "existing" ? TOKENS.amber : TOKENS.textMute,
+          }}
+        >
+          Evento esistente
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        {eventForm.mode === "existing" ? (
+          <select
+            value={eventForm.eventId}
+            onChange={(e) => setEventForm({ ...eventForm, eventId: e.target.value })}
+            style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18, minWidth: 200 }}
+          >
+            <option value="">Scegli evento…</option>
+            {eventsPool.map((e) => (
+              <option key={e.id} value={e.id}>{e.name}{!forCameramanId ? ` — ${cameramanName(e.cameramanId)}` : ""}</option>
+            ))}
+          </select>
+        ) : (
+          <>
+            <input
+              placeholder="Nome evento (es. Matrimonio Villa Erba)"
+              value={eventForm.name}
+              onChange={(e) => setEventForm({ ...eventForm, name: e.target.value })}
+              style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18, minWidth: 190 }}
+            />
+            {showCameramanPicker && (
+              <select
+                value={eventForm.cameramanId}
+                onChange={(e) => setEventForm({ ...eventForm, cameramanId: e.target.value })}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18 }}
+              >
+                <option value="">Cameraman…</option>
+                {cameramen.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+              </select>
+            )}
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input type="date" value={eventForm.fromDate} onChange={(e) => setEventForm({ ...eventForm, fromDate: e.target.value })}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18 }} />
+              <input type="time" value={eventForm.fromTime} onChange={(e) => setEventForm({ ...eventForm, fromTime: e.target.value })}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18, width: 92 }} />
+            </div>
+            <span style={{ color: TOKENS.textMute, fontSize: 17 }}>→</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <input type="date" value={eventForm.toDate} onChange={(e) => setEventForm({ ...eventForm, toDate: e.target.value })}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18 }} />
+              <input type="time" value={eventForm.toTime} onChange={(e) => setEventForm({ ...eventForm, toTime: e.target.value })}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18, width: 92 }} />
+            </div>
+          </>
+        )}
+
+        <select
+          value={eventForm.itemId}
+          onChange={(e) => setEventForm({ ...eventForm, itemId: e.target.value })}
+          style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18, minWidth: 190 }}
+        >
+          <option value="">Materiale libero in queste date…</option>
+          {availableItems.map((i) => (<option key={i.id} value={i.id}>{i.id} — {i.name}</option>))}
+        </select>
+
+        <button onClick={onSubmit} style={{ display: "flex", alignItems: "center", gap: 6, background: TOKENS.amber, color: "#1A1A1A", border: "none", borderRadius: 6, padding: "8px 14px", fontWeight: 700, fontSize: 18, cursor: "pointer" }}>
+          <Check size={14} /> Assegna
+        </button>
+      </div>
+      {(eventForm.mode === "new" ? eventForm.fromDate : selectedExistingEvent) && availableItems.length === 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 17, color: TOKENS.red }}>
+          <AlertTriangle size={13} /> Nessun materiale libero per queste date/orari.
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------
+   APP
+--------------------------------------------------------- */
+export default function App() {
+  const [items, setItems] = useState(INITIAL_ITEMS);
+  const [cameramen, setCameramen] = useState(INITIAL_CAMERAMEN);
+  const [events, setEvents] = useState(INITIAL_EVENTS);
+  const [assignments, setAssignments] = useState(INITIAL_ASSIGNMENTS);
+
+  const [role, setRole] = useState("responsabile");
+  const [cameramanId, setCameramanId] = useState(INITIAL_CAMERAMEN[0].id);
+  const [tab, setTab] = useState("dashboard");
+  const [search, setSearch] = useState("");
+  const [materialView, setMaterialView] = useState("grid");
+  const [newItem, setNewItem] = useState({ id: "", name: "", category: "camera" });
+  const [newCameraman, setNewCameraman] = useState("");
+  const [toast, setToast] = useState(null);
+
+  const emptyEventForm = { mode: "new", eventId: "", name: "", cameramanId: "", fromDate: "", fromTime: "", toDate: "", toTime: "", itemId: "" };
+  const [eventForm, setEventForm] = useState(emptyEventForm);
+
+  function showToast(msg) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2500);
+  }
+
+  const cameramanName = (id) => cameramen.find((c) => c.id === id)?.name || "—";
+
+  function itemsForEvent(eventId) {
+    return assignments
+      .filter((a) => a.eventId === eventId)
+      .map((assignment) => ({ assignment, item: items.find((i) => i.id === assignment.itemId) }))
+      .filter((x) => x.item);
+  }
+
+  /* Materiale libero per un dato intervallo data/ora, escludendo eventualmente
+     l'evento che si sta modificando (per non "auto-bloccarsi" il proprio materiale) */
+  function getAvailableItems(fromDate, fromTime, toDate, toTime, excludeEventId) {
+    if (!fromDate) return items.filter((i) => i.status !== "manutenzione");
+    const from = toDateTime(fromDate, fromTime, "00:00");
+    const to = toDateTime(toDate || fromDate, toTime, "23:59");
+    return items.filter((i) => {
+      if (i.status === "manutenzione") return false;
+      const clash = assignments.some((a) => {
+        if (a.itemId !== i.id) return false;
+        if (a.eventId === excludeEventId) return false;
+        const ev = events.find((e) => e.id === a.eventId);
+        if (!ev) return false;
+        const r = eventRange(ev);
+        return rangesOverlap(from, to, r.from, r.to);
+      });
+      return !clash;
+    });
+  }
+
+  function isCurrentlyInUse(itemId) {
+    const now = new Date();
+    return assignments.some((a) => {
+      if (a.itemId !== itemId) return false;
+      const ev = events.find((e) => e.id === a.eventId);
+      if (!ev) return false;
+      const r = eventRange(ev);
+      return r.from && r.to && r.from <= now && now <= r.to;
+    });
+  }
+
+  function computeStatus(item) {
+    if (item.status === "manutenzione") return "manutenzione";
+    return isCurrentlyInUse(item.id) ? "assegnato" : "disponibile";
+  }
+
+  const counts = useMemo(() => {
+    const byStatus = { disponibile: 0, assegnato: 0, manutenzione: 0 };
+    items.forEach((i) => byStatus[computeStatus(i)]++);
+    return byStatus;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, assignments, events]);
+
+  const filteredItems = items.filter((i) => i.name.toLowerCase().includes(search.toLowerCase()) || i.id.toLowerCase().includes(search.toLowerCase()));
+
+  /* --- Crea/aggiorna evento e assegna un materiale (responsabile o self-service) --- */
+  function submitEventAssignment(forCameramanId) {
+    const { mode, eventId, name, fromDate, fromTime, toDate, toTime, itemId } = eventForm;
+    if (!itemId) { showToast("Scegli un materiale."); return; }
+
+    let targetEventId = eventId;
+
+    if (mode === "new") {
+      if (!name.trim() || !fromDate) { showToast("Dai un nome all'evento e una data di inizio."); return; }
+      const camId = forCameramanId || eventForm.cameramanId;
+      if (!camId) { showToast("Scegli il cameraman."); return; }
+      targetEventId = "ev-" + Date.now();
+      setEvents((prev) => [...prev, {
+        id: targetEventId, name: name.trim(), cameramanId: camId,
+        fromDate, fromTime: fromTime || "00:00",
+        toDate: toDate || fromDate, toTime: toTime || "23:59",
+      }]);
+    } else if (!eventId) {
+      showToast("Scegli un evento esistente.");
+      return;
+    }
+
+    const assignId = "a-" + Date.now();
+    setAssignments((prev) => [...prev, { id: assignId, itemId, eventId: targetEventId }]);
+    setEventForm(emptyEventForm);
+    showToast("Materiale assegnato all'evento.");
+  }
+
+  function addItemToEvent(eventId, itemId) {
+    const assignId = "a-" + Date.now();
+    setAssignments((prev) => [...prev, { id: assignId, itemId, eventId }]);
+    showToast("Materiale aggiunto all'evento.");
+  }
+
+  function removeItemFromEvent(assignmentId) {
+    const a = assignments.find((x) => x.id === assignmentId);
+    if (!a) return;
+    setAssignments((prev) => prev.filter((x) => x.id !== assignmentId));
+    showToast(`${a.itemId} rientrato in magazzino.`);
+  }
+
+  function deleteEvent(eventId) {
+    setAssignments((prev) => prev.filter((a) => a.eventId !== eventId));
+    setEvents((prev) => prev.filter((e) => e.id !== eventId));
+    showToast("Evento chiuso, materiale rientrato.");
+  }
+
+  function setItemManualStatus(itemId, status) {
+    setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, status } : i)));
+  }
+
+  function setItemNote(itemId, note) {
+    setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, note } : i)));
+  }
+
+  function addItem() {
+    if (!newItem.id || !newItem.name) { showToast("Inserisci codice e nome del materiale."); return; }
+    if (items.some((i) => i.id === newItem.id)) { showToast("Codice già esistente."); return; }
+    setItems([...items, { ...newItem, status: "disponibile", note: "" }]);
+    setNewItem({ id: "", name: "", category: "camera" });
+    showToast("Materiale aggiunto al magazzino.");
+  }
+
+  function removeItem(id) {
+    setAssignments((prev) => prev.filter((a) => a.itemId !== id));
+    setItems((prev) => prev.filter((i) => i.id !== id));
+  }
+
+  function addCameraman() {
+    if (!newCameraman.trim()) return;
+    setCameramen((prev) => [...prev, { id: "cm-" + Date.now(), name: newCameraman.trim() }]);
+    setNewCameraman("");
+    showToast("Cameraman aggiunto.");
+  }
+
+  function deleteCameraman(id) {
+    const theirEventIds = events.filter((e) => e.cameramanId === id).map((e) => e.id);
+    setAssignments((prev) => prev.filter((a) => !theirEventIds.includes(a.eventId)));
+    setEvents((prev) => prev.filter((e) => e.cameramanId !== id));
+    const remaining = cameramen.filter((c) => c.id !== id);
+    setCameramen(remaining);
+    if (cameramanId === id && remaining.length > 0) setCameramanId(remaining[0].id);
+    showToast("Cameraman eliminato, suoi eventi chiusi.");
+  }
+
+  const canManage = role === "responsabile";
+  const myEvents = events.filter((e) => e.cameramanId === cameramanId);
+
+  const NAV = [
+    { key: "dashboard", label: "Dashboard", icon: LayoutGrid, roles: ["responsabile", "cameraman"] },
+    { key: "calendario", label: "Calendario", icon: CalendarDays, roles: ["responsabile", "cameraman"] },
+    { key: "materiale", label: "Materiale", icon: Package, roles: ["responsabile"] },
+    { key: "eventi", label: "Eventi", icon: ClipboardList, roles: ["responsabile"] },
+    { key: "cameramen", label: "Cameraman", icon: Users, roles: ["responsabile"] },
+    { key: "mie", label: "I miei eventi", icon: Folder, roles: ["cameraman"] },
+  ];
+  const visibleNav = NAV.filter((n) => n.roles.includes(role));
+  const activeTab = visibleNav.some((n) => n.key === tab) ? tab : visibleNav[0].key;
+
+  return (
+    <div style={{ display: "flex", minHeight: 600, background: TOKENS.bg, color: TOKENS.text, fontFamily: "'Inter','Helvetica Neue',Arial,sans-serif", borderRadius: 10, overflow: "hidden", border: `1px solid ${TOKENS.line}` }}>
+      {/* SIDEBAR */}
+      <div style={{ width: 200, background: TOKENS.panel, borderRight: `1px solid ${TOKENS.line}`, padding: "18px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ padding: "0 8px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{ width: 8, height: 8, borderRadius: "50%", background: TOKENS.red }} />
+            <span style={{ fontSize: 16, letterSpacing: "0.12em", color: TOKENS.textMute, fontWeight: 700 }}>ON AIR</span>
+          </div>
+          <div style={{ fontSize: 21, fontWeight: 800, marginTop: 6, letterSpacing: "-0.01em" }}>SkySportGear</div>
+          <div style={{ fontSize: 16, color: TOKENS.textMute, marginTop: 2 }}>gestione materiale</div>
+        </div>
+        {visibleNav.map((n) => (
+          <NavButton key={n.key} active={activeTab === n.key} onClick={() => { setTab(n.key); setEventForm(emptyEventForm); }} icon={n.icon} label={n.label} />
+        ))}
+      </div>
+
+      {/* MAIN */}
+      <div style={{ flex: 1, padding: "20px 26px", overflow: "auto" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+          <div>
+            <div style={{ fontSize: 25, fontWeight: 800 }}>{visibleNav.find((n) => n.key === activeTab)?.label}</div>
+            <div style={{ fontSize: 17.5, color: TOKENS.textMute, marginTop: 2 }}>
+              {role === "cameraman" ? `Visualizzazione come ${cameramanName(cameramanId)}` : `Visualizzazione: ${role}`}
+            </div>
+          </div>
+          <RoleSwitcher role={role} setRole={setRole} cameramanId={cameramanId} setCameramanId={setCameramanId} cameramen={cameramen} />
+        </div>
+
+        {/* ---------------- DASHBOARD ---------------- */}
+        {activeTab === "dashboard" && (
+          <div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 22 }}>
+              {Object.entries(STATUS_META).map(([key, meta]) => (
+                <div key={key} style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: "16px 18px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }} />
+                    <span style={{ fontSize: 17, color: TOKENS.textMute, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.label}</span>
+                  </div>
+                  <div style={{ fontSize: 37, fontWeight: 800, marginTop: 8, fontFamily: "ui-monospace, monospace" }}>{counts[key]}</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ fontSize: 18, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
+              Eventi programmati
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {events.length === 0 && <div style={{ color: TOKENS.textMute, fontSize: 18 }}>Nessun evento attivo.</div>}
+              {events.map((ev) => (
+                <EventCard key={ev.id} event={ev} items={itemsForEvent(ev.id)} cameramanLabel={cameramanName(ev.cameramanId)} readOnly />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ---------------- CALENDARIO (sola visualizzazione) ---------------- */}
+        {activeTab === "calendario" && (
+          <div>
+            {role === "cameraman" && (
+              <div style={{ fontSize: 15, color: TOKENS.textMute, marginBottom: 14 }}>
+                Vedi gli eventi di tutti i cameraman, non solo i tuoi.
+              </div>
+            )}
+            {(() => {
+              const months = getMonthsWithEvents(events);
+              if (months.length === 0) {
+                return <div style={{ color: TOKENS.textMute, fontSize: 18 }}>Nessun evento da mostrare in calendario.</div>;
+              }
+              return months.map(({ year, month }) => (
+                <MonthCalendar key={`${year}-${month}`} year={year} month={month} events={events} cameramanName={cameramanName} materialForEvent={itemsForEvent} />
+              ));
+            })()}
+          </div>
+        )}
+
+        {/* ---------------- MATERIALE ---------------- */}
+        {activeTab === "materiale" && canManage && (
+          <div>
+            <div style={{ display: "flex", gap: 10, marginBottom: 18, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
+                <Search size={14} color={TOKENS.textMute} style={{ position: "absolute", left: 10, top: 10 }} />
+                <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cerca per nome o codice…"
+                  style={{ width: "100%", background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px 8px 32px", color: TOKENS.text, fontSize: 18 }} />
+              </div>
+              <div style={{ display: "flex", gap: 4, background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: 4 }}>
+                <button
+                  onClick={() => setMaterialView("grid")}
+                  title="Vista a riquadri"
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 6, border: "none", fontSize: 16, fontWeight: 600, cursor: "pointer", background: materialView === "grid" ? TOKENS.amber : "transparent", color: materialView === "grid" ? "#1A1A1A" : TOKENS.textMute }}
+                >
+                  <LayoutGrid size={14} /> Riquadri
+                </button>
+                <button
+                  onClick={() => setMaterialView("list")}
+                  title="Vista a lista"
+                  style={{ display: "flex", alignItems: "center", gap: 6, padding: "7px 12px", borderRadius: 6, border: "none", fontSize: 16, fontWeight: 600, cursor: "pointer", background: materialView === "list" ? TOKENS.amber : "transparent", color: materialView === "list" ? "#1A1A1A" : TOKENS.textMute }}
+                >
+                  <Rows3 size={14} /> Lista
+                </button>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginBottom: 22, flexWrap: "wrap", background: TOKENS.panel, border: `1px dashed ${TOKENS.line}`, borderRadius: 8, padding: 12 }}>
+              <input placeholder="Codice (es. CAM-030)" value={newItem.id} onChange={(e) => setNewItem({ ...newItem, id: e.target.value.toUpperCase() })}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18, width: 150 }} />
+              <input placeholder="Nome / modello" value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18, flex: 1, minWidth: 140 }} />
+              <select value={newItem.category} onChange={(e) => setNewItem({ ...newItem, category: e.target.value })}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18 }}>
+                {Object.entries(CATEGORY_META).map(([k, m]) => (<option key={k} value={k}>{m.label}</option>))}
+              </select>
+              <button onClick={addItem} style={{ display: "flex", alignItems: "center", gap: 6, background: TOKENS.amber, color: "#1A1A1A", border: "none", borderRadius: 6, padding: "8px 14px", fontWeight: 700, fontSize: 18, cursor: "pointer" }}>
+                <Plus size={14} /> Aggiungi
+              </button>
+            </div>
+
+            {Object.entries(CATEGORY_META).map(([catKey, catMeta]) => {
+              const catItems = filteredItems.filter((i) => i.category === catKey);
+              if (catItems.length === 0) return null;
+              const CatIcon = catMeta.icon;
+              return (
+                <div key={catKey} style={{ marginBottom: 26 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <CatIcon size={16} color={catMeta.color} strokeWidth={2} />
+                    <span style={{ fontSize: 16, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em" }}>{catMeta.label}</span>
+                    <span style={{ fontSize: 14, color: TOKENS.textMute }}>({catItems.length})</span>
+                  </div>
+
+                  {materialView === "grid" ? (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 10 }}>
+                      {catItems.map((item) => (
+                        <div key={item.id}>
+                          <GearTag item={item} status={computeStatus(item)} />
+                          <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
+                            <select
+                              value={item.status}
+                              onChange={(e) => setItemManualStatus(item.id, e.target.value)}
+                              title="Stato manuale (il rientro 'in uso' è automatico in base agli eventi)"
+                              style={{ flex: 1, fontSize: 15, background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 5, padding: "4px 6px" }}
+                            >
+                              <option value="disponibile">Disponibile</option>
+                              <option value="manutenzione">Manutenzione</option>
+                            </select>
+                            <button onClick={() => removeItem(item.id)} title="Rimuovi materiale" style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, borderRadius: 5, color: TOKENS.red, padding: "4px 7px", cursor: "pointer" }}>
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                          <input
+                            value={item.note || ""}
+                            onChange={(e) => setItemNote(item.id, e.target.value)}
+                            placeholder="Nota (es. da controllare, graffio, ecc.)"
+                            style={{ width: "100%", marginTop: 4, fontSize: 14, background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, color: TOKENS.text, borderRadius: 5, padding: "5px 7px", boxSizing: "border-box" }}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {catItems.map((item) => {
+                        const st = STATUS_META[computeStatus(item)];
+                        return (
+                          <div
+                            key={item.id}
+                            style={{
+                              display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                              background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderLeft: `3px solid ${catMeta.color}`,
+                              borderRadius: 6, padding: "8px 12px",
+                            }}
+                          >
+                            <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 15, color: TOKENS.textMute, width: 90, flexShrink: 0 }}>{item.id}</span>
+                            <span style={{ fontSize: 17, fontWeight: 600, minWidth: 150 }}>{item.name}</span>
+                            <Tag color={st.color}>{st.label}</Tag>
+                            <input
+                              value={item.note || ""}
+                              onChange={(e) => setItemNote(item.id, e.target.value)}
+                              placeholder="Nota…"
+                              style={{ flex: 1, minWidth: 140, fontSize: 14, background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, color: TOKENS.text, borderRadius: 5, padding: "5px 8px" }}
+                            />
+                            <select
+                              value={item.status}
+                              onChange={(e) => setItemManualStatus(item.id, e.target.value)}
+                              title="Stato manuale (il rientro 'in uso' è automatico in base agli eventi)"
+                              style={{ fontSize: 14, background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 5, padding: "5px 6px" }}
+                            >
+                              <option value="disponibile">Disponibile</option>
+                              <option value="manutenzione">Manutenzione</option>
+                            </select>
+                            <button onClick={() => removeItem(item.id)} title="Rimuovi materiale" style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, borderRadius: 5, color: TOKENS.red, padding: "5px 8px", cursor: "pointer", flexShrink: 0 }}>
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {filteredItems.length === 0 && <div style={{ color: TOKENS.textMute, fontSize: 17 }}>Nessun materiale trovato.</div>}
+          </div>
+        )}
+
+        {/* ---------------- EVENTI (responsabile) ---------------- */}
+        {activeTab === "eventi" && canManage && (
+          <div>
+            <EventAssignForm
+              forCameramanId={null}
+              eventsPool={events}
+              cameramen={cameramen}
+              cameramanName={cameramanName}
+              eventForm={eventForm}
+              setEventForm={setEventForm}
+              emptyEventForm={emptyEventForm}
+              getAvailableItems={getAvailableItems}
+              onSubmit={() => submitEventAssignment(null)}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {events.length === 0 && <div style={{ color: TOKENS.textMute, fontSize: 18 }}>Nessun evento creato.</div>}
+              {events.map((ev) => (
+                <EventCard
+                  key={ev.id}
+                  event={ev}
+                  items={itemsForEvent(ev.id)}
+                  availableForThisEvent={getAvailableItems(ev.fromDate, ev.fromTime, ev.toDate, ev.toTime, ev.id)}
+                  cameramanLabel={cameramanName(ev.cameramanId)}
+                  onAddItem={addItemToEvent}
+                  onRemoveItem={removeItemFromEvent}
+                  onDeleteEvent={deleteEvent}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ---------------- CAMERAMEN ---------------- */}
+        {activeTab === "cameramen" && role === "responsabile" && (
+          <div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+              <input placeholder="Nome cameraman" value={newCameraman} onChange={(e) => setNewCameraman(e.target.value)}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18, width: 220 }} />
+              <button onClick={addCameraman} style={{ display: "flex", alignItems: "center", gap: 6, background: TOKENS.amber, color: "#1A1A1A", border: "none", borderRadius: 6, padding: "8px 14px", fontWeight: 700, fontSize: 18, cursor: "pointer" }}>
+                <Plus size={14} /> Aggiungi
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
+              {cameramen.map((c) => {
+                const evCount = events.filter((e) => e.cameramanId === c.id).length;
+                return (
+                  <div key={c.id} style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: 14 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 19.5 }}>{c.name}</div>
+                        <div style={{ fontSize: 17, color: TOKENS.textMute, marginTop: 4 }}>{evCount} evento/i attivo/i</div>
+                      </div>
+                      <button
+                        onClick={() => deleteCameraman(c.id)}
+                        title="Elimina cameraman (chiude i suoi eventi e libera il materiale)"
+                        style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, borderRadius: 5, color: TOKENS.red, padding: "5px 7px", cursor: "pointer" }}
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+              {cameramen.length === 0 && <div style={{ color: TOKENS.textMute, fontSize: 18 }}>Nessun cameraman in elenco.</div>}
+            </div>
+          </div>
+        )}
+
+        {/* ---------------- I MIEI EVENTI (cameraman) ---------------- */}
+        {activeTab === "mie" && role === "cameraman" && (
+          <div>
+            {cameramen.length === 0 ? (
+              <div style={{ color: TOKENS.textMute, fontSize: 18.5 }}>Nessun cameraman registrato.</div>
+            ) : (
+              <>
+                <EventAssignForm
+                  forCameramanId={cameramanId}
+                  eventsPool={myEvents}
+                  cameramen={cameramen}
+                  cameramanName={cameramanName}
+                  eventForm={eventForm}
+                  setEventForm={setEventForm}
+                  emptyEventForm={emptyEventForm}
+                  getAvailableItems={getAvailableItems}
+                  onSubmit={() => submitEventAssignment(cameramanId)}
+                />
+                <div style={{ fontSize: 18, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
+                  I tuoi eventi
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {myEvents.length === 0 && <div style={{ color: TOKENS.textMute, fontSize: 18.5 }}>Nessun evento attivo al momento.</div>}
+                  {myEvents.map((ev) => (
+                    <EventCard
+                      key={ev.id}
+                      event={ev}
+                      items={itemsForEvent(ev.id)}
+                      availableForThisEvent={getAvailableItems(ev.fromDate, ev.fromTime, ev.toDate, ev.toTime, ev.id)}
+                      onAddItem={addItemToEvent}
+                      onRemoveItem={removeItemFromEvent}
+                      onDeleteEvent={deleteEvent}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </div>
+
+      {toast && (
+        <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: TOKENS.panelRaised, border: `1px solid ${TOKENS.amber}`, color: TOKENS.text, padding: "10px 18px", borderRadius: 8, fontSize: 18, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}
