@@ -1,3 +1,4 @@
+import * as XLSX from "xlsx";
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Camera, Mic, Lightbulb, Plus, X, Check, AlertTriangle,
@@ -672,6 +673,7 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
   const [materialView, setMaterialView] = useState("grid");
+  const excelInputRef = useRef(null);
   const [newItem, setNewItem] = useState({ id: "", name: "", category: "camera" });
   const [newCameraman, setNewCameraman] = useState("");
   const [toast, setToast] = useState(null);
@@ -679,13 +681,65 @@ export default function App() {
   const emptyEventForm = { mode: "new", eventId: "", name: "", cameramanId: "", fromDate: "", fromTime: "", toDate: "", toTime: "", itemId: "" };
   const [eventForm, setEventForm] = useState(emptyEventForm);
 
-  const [syncStatus, setSyncStatus] = useState("connessione"); // connessione | sincronizzato | salvataggio | offline
-  const pendingSaveRef = useRef(false);
-  const saveTimeoutRef = useRef(null);
+  const [syncStatus, setSyncStatus] = useState("connessione"); // connessione | pronto | in-corso | offline
+  const [lastSyncAt, setLastSyncAt] = useState(null);
   const didLoadRef = useRef(false);
 
+  /* Legge un blocco dati da Firebase, trattando in modo esplicito le liste
+     mancanti come "vuote": Firebase non conserva gli array vuoti (li
+     cancella), quindi l'assenza di una chiave qui significa "lista svuotata
+     di proposito", non "nessun dato ancora salvato". */
+  function normalizeRemote(remote) {
+    return {
+      items: remote?.items || [],
+      cameramen: remote?.cameramen || [],
+      events: remote?.events || [],
+      assignments: remote?.assignments || [],
+    };
+  }
+
+  /* Controlla se, tra le assegnazioni presenti sul server ma non ancora
+     viste in locale, ce n'è qualcuna che usa lo stesso materiale in un
+     periodo che si sovrappone a un'assegnazione fatta qui in locale: è il
+     caso classico di due persone che assegnano lo stesso pezzo nello stesso
+     momento. Restituisce un elenco di conflitti leggibili, vuoto se nessuno. */
+  function findBookingConflicts(remote) {
+    const conflicts = [];
+    const remoteEvents = remote.events || [];
+    const localEventsById = new Map(events.map((e) => [e.id, e]));
+    const remoteEventsById = new Map(remoteEvents.map((e) => [e.id, e]));
+
+    assignments.forEach((localA) => {
+      const localEvent = localEventsById.get(localA.eventId);
+      if (!localEvent) return;
+      const localRange = eventRange(localEvent);
+
+      (remote.assignments || []).forEach((remoteA) => {
+        if (remoteA.itemId !== localA.itemId) return;
+        if (remoteA.eventId === localA.eventId) return; // stessa assegnazione, non è un conflitto
+        const remoteEvent = remoteEventsById.get(remoteA.eventId);
+        if (!remoteEvent) return;
+        const remoteRange = eventRange(remoteEvent);
+        if (rangesOverlap(localRange.from, localRange.to, remoteRange.from, remoteRange.to)) {
+          const already = conflicts.some((c) => c.itemId === localA.itemId && c.remoteEventId === remoteA.eventId);
+          if (!already) {
+            conflicts.push({
+              itemId: localA.itemId,
+              itemName: items.find((i) => i.id === localA.itemId)?.name || localA.itemId,
+              localEventName: localEvent.name,
+              remoteEventName: remoteEvent.name,
+              remoteEventId: remoteA.eventId,
+            });
+          }
+        }
+      });
+    });
+    return conflicts;
+  }
+
   /* Al primo avvio, scarica i dati condivisi da Firebase (se presenti) e
-     sostituisce quelli locali/di esempio. */
+     sostituisce quelli locali/di esempio. Da qui in poi la sincronizzazione
+     è sempre manuale (pulsanti "Carica" e "Condividi"), mai automatica. */
   useEffect(() => {
     let cancelled = false;
     fetch(FIREBASE_DATA_URL)
@@ -693,12 +747,14 @@ export default function App() {
       .then((remote) => {
         if (cancelled) return;
         if (remote) {
-          if (remote.items) setItems(remote.items);
-          if (remote.cameramen) setCameramen(remote.cameramen);
-          if (remote.events) setEvents(remote.events);
-          if (remote.assignments) setAssignments(remote.assignments);
+          const n = normalizeRemote(remote);
+          setItems(n.items);
+          setCameramen(n.cameramen);
+          setEvents(n.events);
+          setAssignments(n.assignments);
         }
-        setSyncStatus("sincronizzato");
+        setSyncStatus("pronto");
+        setLastSyncAt(new Date());
         didLoadRef.current = true;
       })
       .catch(() => {
@@ -709,57 +765,69 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* Ad ogni modifica, dopo una breve pausa (per non scrivere ad ogni singolo
-     tasto premuto), salva lo stato completo su Firebase: da quel momento è
-     visibile a chiunque altro apra l'app. */
-  useEffect(() => {
-    if (!didLoadRef.current) return; // evita di sovrascrivere prima di aver caricato i dati condivisi
-    pendingSaveRef.current = true;
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-    saveTimeoutRef.current = setTimeout(() => {
-      setSyncStatus("salvataggio");
-      fetch(FIREBASE_DATA_URL, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items, cameramen, events, assignments }),
+  /* Pulsante "Carica dati condivisi": sostituisce lo stato locale con
+     l'ultima versione salvata da chiunque altro. Le modifiche locali non
+     ancora condivise andrebbero perse, quindi chiede conferma. */
+  function pullSharedData() {
+    if (window.confirm("Caricare gli ultimi dati condivisi? Eventuali modifiche fatte qui e non ancora condivise andranno perse.") === false) return;
+    setSyncStatus("in-corso");
+    fetch(FIREBASE_DATA_URL)
+      .then((res) => res.json())
+      .then((remote) => {
+        const n = normalizeRemote(remote);
+        setItems(n.items);
+        setCameramen(n.cameramen);
+        setEvents(n.events);
+        setAssignments(n.assignments);
+        setSyncStatus("pronto");
+        setLastSyncAt(new Date());
+        showToast("Dati condivisi caricati.");
       })
-        .then(() => setSyncStatus("sincronizzato"))
-        .catch(() => setSyncStatus("offline"))
-        .finally(() => { pendingSaveRef.current = false; });
-    }, 800);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, cameramen, events, assignments]);
+      .catch(() => {
+        setSyncStatus("offline");
+        showToast("Impossibile raggiungere il database condiviso.");
+      });
+  }
 
-  /* Ogni pochi secondi controlla se qualcun altro ha modificato i dati
-     condivisi, e se sì li recepisce (a meno che tu stesso stia per salvare
-     una modifica non ancora inviata, per non perderla). */
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (pendingSaveRef.current) return;
-      fetch(FIREBASE_DATA_URL)
-        .then((res) => res.json())
-        .then((remote) => {
-          if (!remote) return;
-          const current = JSON.stringify({ items, cameramen, events, assignments });
-          const incoming = JSON.stringify({
-            items: remote.items || items,
-            cameramen: remote.cameramen || cameramen,
-            events: remote.events || events,
-            assignments: remote.assignments || assignments,
-          });
-          if (current !== incoming) {
-            if (remote.items) setItems(remote.items);
-            if (remote.cameramen) setCameramen(remote.cameramen);
-            if (remote.events) setEvents(remote.events);
-            if (remote.assignments) setAssignments(remote.assignments);
-          }
-          setSyncStatus("sincronizzato");
-        })
-        .catch(() => setSyncStatus("offline"));
-    }, 6000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, cameramen, events, assignments]);
+  /* Pulsante "Condividi le mie modifiche": prima controlla eventuali
+     conflitti di prenotazione materiale avvenuti nel frattempo su altri
+     dispositivi; se ne trova, blocca l'invio e li segnala chiaramente
+     invece di sovrascrivere silenziosamente. */
+  function pushSharedData() {
+    setSyncStatus("in-corso");
+    fetch(FIREBASE_DATA_URL)
+      .then((res) => res.json())
+      .then((remoteRaw) => {
+        const remote = normalizeRemote(remoteRaw);
+        const conflicts = findBookingConflicts(remote);
+        if (conflicts.length > 0) {
+          setSyncStatus("pronto");
+          const details = conflicts
+            .map((c) => `• ${c.itemName} (${c.itemId}): assegnato qui a "${c.localEventName}", ma nel frattempo anche a "${c.remoteEventName}" da qualcun altro, con date che si sovrappongono`)
+            .join("\n");
+          window.alert(
+            "Impossibile condividere: c'è un conflitto di prenotazione materiale.\n\n" +
+            details +
+            "\n\nCarica prima i dati condivisi (pulsante 'Carica dati condivisi'), correggi l'assegnazione in conflitto, poi riprova a condividere."
+          );
+          return;
+        }
+        return fetch(FIREBASE_DATA_URL, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ items, cameramen, events, assignments }),
+        }).then(() => {
+          setSyncStatus("pronto");
+          setLastSyncAt(new Date());
+          showToast("Modifiche condivise con tutti.");
+        });
+      })
+      .catch(() => {
+        setSyncStatus("offline");
+        showToast("Impossibile raggiungere il database condiviso.");
+      });
+  }
+
 
   function showToast(msg) {
     setToast(msg);
@@ -888,6 +956,62 @@ export default function App() {
     setItems((prev) => prev.filter((i) => i.id !== id));
   }
 
+  function exportItemsToExcel() {
+    const rows = items.map((i) => ({
+      Codice: i.id,
+      Nome: i.name,
+      Categoria: i.category,
+      Stato: i.status,
+      Nota: i.note || "",
+    }));
+    const worksheet = XLSX.utils.json_to_sheet(rows);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Materiale");
+    XLSX.writeFile(workbook, "materiale-skysportgear.xlsx");
+  }
+
+  /* Importa da un file Excel: aggiorna gli oggetti con Codice già esistente
+     e aggiunge quelli nuovi, senza mai cancellare pezzi non presenti nel
+     file (per evitare perdite di dati accidentali). */
+  function importItemsFromExcel(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet);
+        const validCategories = Object.keys(CATEGORY_META);
+        let added = 0, updated = 0, skipped = 0;
+
+        setItems((prev) => {
+          const map = new Map(prev.map((i) => [i.id, i]));
+          rows.forEach((row) => {
+            const codice = String(row.Codice ?? row.codice ?? "").trim();
+            if (!codice) { skipped++; return; }
+            const category = validCategories.includes(row.Categoria) ? row.Categoria : "vario";
+            const status = String(row.Stato ?? "").trim() === "manutenzione" ? "manutenzione" : "disponibile";
+            const newItem = {
+              id: codice,
+              name: String(row.Nome ?? row.nome ?? "").trim() || codice,
+              category,
+              status,
+              note: String(row.Nota ?? row.nota ?? ""),
+            };
+            if (map.has(codice)) updated++; else added++;
+            map.set(codice, newItem);
+          });
+          return Array.from(map.values());
+        });
+
+        showToast(`Importazione completata: ${added} aggiunti, ${updated} aggiornati${skipped ? `, ${skipped} righe senza codice ignorate` : ""}.`);
+      } catch (err) {
+        showToast("Il file non sembra un Excel valido (colonne attese: Codice, Nome, Categoria, Stato, Nota).");
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
   function addCameraman() {
     if (!newCameraman.trim()) return;
     setCameramen((prev) => [...prev, { id: "cm-" + Date.now(), name: newCameraman.trim() }]);
@@ -903,16 +1027,6 @@ export default function App() {
     setCameramen(remaining);
     if (cameramanId === id && remaining.length > 0) setCameramanId(remaining[0].id);
     showToast("Cameraman eliminato, suoi eventi chiusi.");
-  }
-
-  function resetAllData() {
-    const ok = window.confirm("Ripristinare i dati di esempio? Tutte le modifiche fatte finora (anche quelle condivise con gli altri) andranno perse.");
-    if (!ok) return;
-    window.localStorage.removeItem("skysportgear_items");
-    window.localStorage.removeItem("skysportgear_cameramen");
-    window.localStorage.removeItem("skysportgear_events");
-    window.localStorage.removeItem("skysportgear_assignments");
-    fetch(FIREBASE_DATA_URL, { method: "DELETE" }).finally(() => window.location.reload());
   }
 
   const canManage = role === "responsabile";
@@ -945,25 +1059,32 @@ export default function App() {
           <NavButton key={n.key} active={activeTab === n.key} onClick={() => { setTab(n.key); setEventForm(emptyEventForm); }} icon={n.icon} label={n.label} />
         ))}
         <div style={{ flex: 1 }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 4px 6px", fontSize: 12, color: TOKENS.textMute }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 4px 8px", fontSize: 12, color: TOKENS.textMute }}>
           <div
             style={{
               width: 7, height: 7, borderRadius: "50%",
-              background: syncStatus === "sincronizzato" ? TOKENS.teal : syncStatus === "salvataggio" ? TOKENS.amber : syncStatus === "offline" ? TOKENS.red : TOKENS.textMute,
+              background: syncStatus === "pronto" ? TOKENS.teal : syncStatus === "in-corso" ? TOKENS.amber : syncStatus === "offline" ? TOKENS.red : TOKENS.textMute,
               flexShrink: 0,
             }}
           />
-          {syncStatus === "sincronizzato" && "Dati condivisi aggiornati"}
-          {syncStatus === "salvataggio" && "Salvataggio…"}
+          {syncStatus === "pronto" && lastSyncAt && `Aggiornato alle ${lastSyncAt.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`}
+          {syncStatus === "in-corso" && "Sincronizzazione…"}
           {syncStatus === "offline" && "Offline: solo su questo dispositivo"}
           {syncStatus === "connessione" && "Connessione…"}
         </div>
         <button
-          onClick={resetAllData}
-          title="Cancella tutti i dati salvati (anche condivisi) e ripristina gli esempi iniziali"
-          style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 6, padding: "8px 10px", fontSize: 13, cursor: "pointer", marginTop: 8 }}
+          onClick={pullSharedData}
+          title="Scarica gli ultimi dati condivisi da tutti (sovrascrive le modifiche locali non ancora condivise)"
+          style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, color: TOKENS.text, borderRadius: 6, padding: "8px 10px", fontSize: 13, cursor: "pointer", marginTop: 4 }}
         >
-          Ripristina dati di esempio
+          ⭳ Carica dati condivisi
+        </button>
+        <button
+          onClick={pushSharedData}
+          title="Condividi le modifiche fatte qui con tutti gli altri (controlla prima eventuali conflitti sul materiale)"
+          style={{ background: TOKENS.amber, border: "none", color: "#1A1A1A", borderRadius: 6, padding: "8px 10px", fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 6 }}
+        >
+          ⭱ Condividi le mie modifiche
         </button>
       </div>
 
@@ -1050,6 +1171,33 @@ export default function App() {
                 >
                   <Rows3 size={14} /> Lista
                 </button>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={exportItemsToExcel}
+                  title="Scarica l'elenco materiale come file Excel"
+                  style={{ display: "flex", alignItems: "center", gap: 6, background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, color: TOKENS.text, borderRadius: 8, padding: "9px 14px", fontSize: 16, fontWeight: 600, cursor: "pointer" }}
+                >
+                  Esporta Excel
+                </button>
+                <button
+                  onClick={() => excelInputRef.current?.click()}
+                  title="Importa/aggiorna materiale da un file Excel (colonne: Codice, Nome, Categoria, Stato, Nota)"
+                  style={{ display: "flex", alignItems: "center", gap: 6, background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, color: TOKENS.text, borderRadius: 8, padding: "9px 14px", fontSize: 16, fontWeight: 600, cursor: "pointer" }}
+                >
+                  Importa Excel
+                </button>
+                <input
+                  ref={excelInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  style={{ display: "none" }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) importItemsFromExcel(file);
+                    e.target.value = "";
+                  }}
+                />
               </div>
             </div>
 
