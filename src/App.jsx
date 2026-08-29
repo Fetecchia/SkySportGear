@@ -48,6 +48,23 @@ const CATEGORY_META = {
   vario: { label: "Vario", icon: Package, color: "#C9645A" },
 };
 
+/* Per l'export/import Excel usiamo la stessa etichetta che si vede nel menù
+   a tendina dell'app (es. "Videocamera"), non la chiave tecnica interna
+   (es. "camera"), per evitare confusione a chi modifica il file. Questa
+   mappatura permette di riconoscere la categoria in fase di importazione
+   sia dall'etichetta che, per tolleranza, dalla vecchia chiave tecnica. */
+const CATEGORY_LABEL_TO_KEY = Object.fromEntries(
+  Object.entries(CATEGORY_META).map(([key, meta]) => [meta.label.toLowerCase(), key])
+);
+function resolveCategoryFromImport(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "vario";
+  const byLabel = CATEGORY_LABEL_TO_KEY[raw.toLowerCase()];
+  if (byLabel) return byLabel;
+  const byKey = Object.keys(CATEGORY_META).find((k) => k.toLowerCase() === raw.toLowerCase());
+  return byKey || "vario";
+}
+
 const STATUS_META = {
   disponibile: { label: "Disponibile", color: TOKENS.teal },
   assegnato: { label: "In uso ora", color: TOKENS.amber },
@@ -674,6 +691,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [materialView, setMaterialView] = useState("grid");
   const excelInputRef = useRef(null);
+  const [selectedDashboardStatus, setSelectedDashboardStatus] = useState(null);
   const [newItem, setNewItem] = useState({ id: "", name: "", category: "camera" });
   const [newCameraman, setNewCameraman] = useState("");
   const [toast, setToast] = useState(null);
@@ -960,8 +978,8 @@ export default function App() {
     const rows = items.map((i) => ({
       Codice: i.id,
       Nome: i.name,
-      Categoria: i.category,
-      Stato: i.status,
+      Categoria: CATEGORY_META[i.category]?.label || i.category,
+      Stato: STATUS_META[i.status]?.label || i.status,
       Nota: i.note || "",
     }));
     const worksheet = XLSX.utils.json_to_sheet(rows);
@@ -972,7 +990,9 @@ export default function App() {
 
   /* Importa da un file Excel: aggiorna gli oggetti con Codice già esistente
      e aggiunge quelli nuovi, senza mai cancellare pezzi non presenti nel
-     file (per evitare perdite di dati accidentali). */
+     file (per evitare perdite di dati accidentali). Riconosce la categoria
+     sia dall'etichetta leggibile (es. "Videocamera") sia, per tolleranza,
+     dalla vecchia chiave tecnica (es. "camera"). */
   function importItemsFromExcel(file) {
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -981,7 +1001,6 @@ export default function App() {
         const workbook = XLSX.read(data, { type: "array" });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json(sheet);
-        const validCategories = Object.keys(CATEGORY_META);
         let added = 0, updated = 0, skipped = 0;
 
         setItems((prev) => {
@@ -989,8 +1008,8 @@ export default function App() {
           rows.forEach((row) => {
             const codice = String(row.Codice ?? row.codice ?? "").trim();
             if (!codice) { skipped++; return; }
-            const category = validCategories.includes(row.Categoria) ? row.Categoria : "vario";
-            const status = String(row.Stato ?? "").trim() === "manutenzione" ? "manutenzione" : "disponibile";
+            const category = resolveCategoryFromImport(row.Categoria ?? row.categoria);
+            const status = String(row.Stato ?? "").trim().toLowerCase() === "manutenzione" ? "manutenzione" : "disponibile";
             const newItem = {
               id: codice,
               name: String(row.Nome ?? row.nome ?? "").trim() || codice,
@@ -1103,17 +1122,51 @@ export default function App() {
         {/* ---------------- DASHBOARD ---------------- */}
         {activeTab === "dashboard" && (
           <div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 22 }}>
-              {Object.entries(STATUS_META).map(([key, meta]) => (
-                <div key={key} style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: "16px 18px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }} />
-                    <span style={{ fontSize: 17, color: TOKENS.textMute, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.label}</span>
-                  </div>
-                  <div style={{ fontSize: 37, fontWeight: 800, marginTop: 8, fontFamily: "ui-monospace, monospace" }}>{counts[key]}</div>
-                </div>
-              ))}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 12, marginBottom: 14 }}>
+              {Object.entries(STATUS_META).map(([key, meta]) => {
+                const active = selectedDashboardStatus === key;
+                return (
+                  <button
+                    key={key}
+                    onClick={() => setSelectedDashboardStatus(active ? null : key)}
+                    style={{
+                      textAlign: "left", cursor: "pointer", background: TOKENS.panel,
+                      border: `1px solid ${active ? meta.color : TOKENS.line}`, borderRadius: 8, padding: "16px 18px",
+                      boxShadow: active ? `0 0 0 1px ${meta.color}` : "none",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }} />
+                      <span style={{ fontSize: 17, color: TOKENS.textMute, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.label}</span>
+                    </div>
+                    <div style={{ fontSize: 37, fontWeight: 800, marginTop: 8, fontFamily: "ui-monospace, monospace" }}>{counts[key]}</div>
+                  </button>
+                );
+              })}
             </div>
+
+            {selectedDashboardStatus && (
+              <div style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: 16, marginBottom: 22 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <span style={{ fontSize: 16, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    Materiale — {STATUS_META[selectedDashboardStatus].label}
+                  </span>
+                  <button onClick={() => setSelectedDashboardStatus(null)} style={{ background: "transparent", border: "none", color: TOKENS.textMute, cursor: "pointer", display: "flex" }}>
+                    <X size={16} />
+                  </button>
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {items.filter((i) => computeStatus(i) === selectedDashboardStatus).map((item) => (
+                    <div key={item.id} title={item.note || undefined}>
+                      <GearChip item={item} />
+                    </div>
+                  ))}
+                  {items.filter((i) => computeStatus(i) === selectedDashboardStatus).length === 0 && (
+                    <span style={{ fontSize: 14, color: TOKENS.textMute }}>Nessun materiale in questo stato.</span>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div style={{ fontSize: 18, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
               Eventi programmati
