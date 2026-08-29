@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Camera, Mic, Lightbulb, Plus, X, Check, AlertTriangle,
   Package, Users, ClipboardList, LayoutGrid, ChevronDown,
@@ -632,11 +632,40 @@ function EventAssignForm({ forCameramanId, eventsPool, cameramen, cameramanName,
 /* ---------------------------------------------------------
    APP
 --------------------------------------------------------- */
+/* Database condiviso (Firebase Realtime Database): qui vengono letti e
+   scritti i dati reali, visibili a tutti quelli che usano l'app. */
+const FIREBASE_DATA_URL = "https://skysportgear-default-rtdb.europe-west1.firebasedatabase.app/skysportgear.json";
+
+/* Come useState, ma salva automaticamente il valore nel localStorage del
+   browser e lo ricarica al successivo avvio: così i dati sopravvivono al
+   refresh della pagina e alla chiusura del browser (sullo stesso dispositivo).
+   Fa da cache locale/di riserva: il vero dato condiviso vive su Firebase
+   (vedi gli effect dentro App più sotto). */
+function usePersistentState(key, initialValue) {
+  const [state, setState] = useState(() => {
+    try {
+      const stored = window.localStorage.getItem(key);
+      return stored ? JSON.parse(stored) : initialValue;
+    } catch {
+      return initialValue;
+    }
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(state));
+    } catch {
+      // localStorage non disponibile (es. modalità privata): l'app continua
+      // a funzionare, semplicemente senza salvataggio persistente.
+    }
+  }, [key, state]);
+  return [state, setState];
+}
+
 export default function App() {
-  const [items, setItems] = useState(INITIAL_ITEMS);
-  const [cameramen, setCameramen] = useState(INITIAL_CAMERAMEN);
-  const [events, setEvents] = useState(INITIAL_EVENTS);
-  const [assignments, setAssignments] = useState(INITIAL_ASSIGNMENTS);
+  const [items, setItems] = usePersistentState("skysportgear_items", INITIAL_ITEMS);
+  const [cameramen, setCameramen] = usePersistentState("skysportgear_cameramen", INITIAL_CAMERAMEN);
+  const [events, setEvents] = usePersistentState("skysportgear_events", INITIAL_EVENTS);
+  const [assignments, setAssignments] = usePersistentState("skysportgear_assignments", INITIAL_ASSIGNMENTS);
 
   const [role, setRole] = useState("responsabile");
   const [cameramanId, setCameramanId] = useState(INITIAL_CAMERAMEN[0].id);
@@ -649,6 +678,88 @@ export default function App() {
 
   const emptyEventForm = { mode: "new", eventId: "", name: "", cameramanId: "", fromDate: "", fromTime: "", toDate: "", toTime: "", itemId: "" };
   const [eventForm, setEventForm] = useState(emptyEventForm);
+
+  const [syncStatus, setSyncStatus] = useState("connessione"); // connessione | sincronizzato | salvataggio | offline
+  const pendingSaveRef = useRef(false);
+  const saveTimeoutRef = useRef(null);
+  const didLoadRef = useRef(false);
+
+  /* Al primo avvio, scarica i dati condivisi da Firebase (se presenti) e
+     sostituisce quelli locali/di esempio. */
+  useEffect(() => {
+    let cancelled = false;
+    fetch(FIREBASE_DATA_URL)
+      .then((res) => res.json())
+      .then((remote) => {
+        if (cancelled) return;
+        if (remote) {
+          if (remote.items) setItems(remote.items);
+          if (remote.cameramen) setCameramen(remote.cameramen);
+          if (remote.events) setEvents(remote.events);
+          if (remote.assignments) setAssignments(remote.assignments);
+        }
+        setSyncStatus("sincronizzato");
+        didLoadRef.current = true;
+      })
+      .catch(() => {
+        setSyncStatus("offline");
+        didLoadRef.current = true;
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /* Ad ogni modifica, dopo una breve pausa (per non scrivere ad ogni singolo
+     tasto premuto), salva lo stato completo su Firebase: da quel momento è
+     visibile a chiunque altro apra l'app. */
+  useEffect(() => {
+    if (!didLoadRef.current) return; // evita di sovrascrivere prima di aver caricato i dati condivisi
+    pendingSaveRef.current = true;
+    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    saveTimeoutRef.current = setTimeout(() => {
+      setSyncStatus("salvataggio");
+      fetch(FIREBASE_DATA_URL, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ items, cameramen, events, assignments }),
+      })
+        .then(() => setSyncStatus("sincronizzato"))
+        .catch(() => setSyncStatus("offline"))
+        .finally(() => { pendingSaveRef.current = false; });
+    }, 800);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, cameramen, events, assignments]);
+
+  /* Ogni pochi secondi controlla se qualcun altro ha modificato i dati
+     condivisi, e se sì li recepisce (a meno che tu stesso stia per salvare
+     una modifica non ancora inviata, per non perderla). */
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (pendingSaveRef.current) return;
+      fetch(FIREBASE_DATA_URL)
+        .then((res) => res.json())
+        .then((remote) => {
+          if (!remote) return;
+          const current = JSON.stringify({ items, cameramen, events, assignments });
+          const incoming = JSON.stringify({
+            items: remote.items || items,
+            cameramen: remote.cameramen || cameramen,
+            events: remote.events || events,
+            assignments: remote.assignments || assignments,
+          });
+          if (current !== incoming) {
+            if (remote.items) setItems(remote.items);
+            if (remote.cameramen) setCameramen(remote.cameramen);
+            if (remote.events) setEvents(remote.events);
+            if (remote.assignments) setAssignments(remote.assignments);
+          }
+          setSyncStatus("sincronizzato");
+        })
+        .catch(() => setSyncStatus("offline"));
+    }, 6000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, cameramen, events, assignments]);
 
   function showToast(msg) {
     setToast(msg);
@@ -794,6 +905,16 @@ export default function App() {
     showToast("Cameraman eliminato, suoi eventi chiusi.");
   }
 
+  function resetAllData() {
+    const ok = window.confirm("Ripristinare i dati di esempio? Tutte le modifiche fatte finora (anche quelle condivise con gli altri) andranno perse.");
+    if (!ok) return;
+    window.localStorage.removeItem("skysportgear_items");
+    window.localStorage.removeItem("skysportgear_cameramen");
+    window.localStorage.removeItem("skysportgear_events");
+    window.localStorage.removeItem("skysportgear_assignments");
+    fetch(FIREBASE_DATA_URL, { method: "DELETE" }).finally(() => window.location.reload());
+  }
+
   const canManage = role === "responsabile";
   const myEvents = events.filter((e) => e.cameramanId === cameramanId);
 
@@ -823,6 +944,27 @@ export default function App() {
         {visibleNav.map((n) => (
           <NavButton key={n.key} active={activeTab === n.key} onClick={() => { setTab(n.key); setEventForm(emptyEventForm); }} icon={n.icon} label={n.label} />
         ))}
+        <div style={{ flex: 1 }} />
+        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 4px 6px", fontSize: 12, color: TOKENS.textMute }}>
+          <div
+            style={{
+              width: 7, height: 7, borderRadius: "50%",
+              background: syncStatus === "sincronizzato" ? TOKENS.teal : syncStatus === "salvataggio" ? TOKENS.amber : syncStatus === "offline" ? TOKENS.red : TOKENS.textMute,
+              flexShrink: 0,
+            }}
+          />
+          {syncStatus === "sincronizzato" && "Dati condivisi aggiornati"}
+          {syncStatus === "salvataggio" && "Salvataggio…"}
+          {syncStatus === "offline" && "Offline: solo su questo dispositivo"}
+          {syncStatus === "connessione" && "Connessione…"}
+        </div>
+        <button
+          onClick={resetAllData}
+          title="Cancella tutti i dati salvati (anche condivisi) e ripristina gli esempi iniziali"
+          style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 6, padding: "8px 10px", fontSize: 13, cursor: "pointer", marginTop: 8 }}
+        >
+          Ripristina dati di esempio
+        </button>
       </div>
 
       {/* MAIN */}
