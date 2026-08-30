@@ -256,7 +256,10 @@ function EventBar({ bar, style, materialForEvent }) {
             <div style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
             <div style={{ fontWeight: 700, fontSize: 18 }}>{bar.event.name}</div>
           </div>
-          <div style={{ fontSize: 15, color: TOKENS.textMute, marginBottom: 7 }}>{bar.cameraman}</div>
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginBottom: 9, padding: "3px 9px", background: `${color}22`, border: `1px solid ${color}55`, borderRadius: 20 }}>
+            <Users size={12} color={color} />
+            <span style={{ fontSize: 14, fontWeight: 700, color: TOKENS.text }}>{bar.cameraman}</span>
+          </div>
           {material.length === 0 ? (
             <div style={{ fontSize: 15, color: TOKENS.textMute }}>Nessun materiale assegnato.</div>
           ) : (
@@ -481,8 +484,13 @@ function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddI
             <div style={{ width: 11, height: 11, borderRadius: 3, background: color, flexShrink: 0 }} title="Colore evento nel calendario" />
             <span style={{ fontSize: 20, fontWeight: 700 }}>{event.name}</span>
           </div>
-          <div style={{ fontSize: 17, color: TOKENS.textMute, marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
-            {cameramanLabel && <span>{cameramanLabel}</span>}
+          {cameramanLabel && (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "3px 9px", background: `${color}22`, border: `1px solid ${color}55`, borderRadius: 20 }}>
+              <Users size={13} color={color} />
+              <span style={{ fontSize: 15, fontWeight: 700, color: TOKENS.text }}>{cameramanLabel}</span>
+            </div>
+          )}
+          <div style={{ fontSize: 17, color: TOKENS.textMute, marginTop: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <Calendar size={12} /> {formatEventWhen(event)}
             </span>
