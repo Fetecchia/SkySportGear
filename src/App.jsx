@@ -680,6 +680,12 @@ function EventAssignForm({ forCameramanId, eventsPool, cameramen, cameramanName,
    scritti i dati reali, visibili a tutti quelli che usano l'app. */
 const FIREBASE_DATA_URL = "https://skysportgear-default-rtdb.europe-west1.firebasedatabase.app/skysportgear.json";
 
+/* Valorizzata da Vite al momento della build (vedi vite.config.js e il
+   workflow GitHub Actions), è diversa ad ogni pubblicazione. Serve per
+   accorgersi quando è uscita una versione più recente dell'app, senza
+   dover chiedere all'utente di fare un "refresh forzato" a mano. */
+const CURRENT_APP_VERSION = typeof __APP_VERSION__ !== "undefined" ? __APP_VERSION__ : "dev";
+
 /* Come useState, ma salva automaticamente il valore nel localStorage del
    browser e lo ricarica al successivo avvio: così i dati sopravvivono al
    refresh della pagina e alla chiusura del browser (sullo stesso dispositivo).
@@ -726,6 +732,34 @@ export default function App() {
   const [eventForm, setEventForm] = useState(emptyEventForm);
 
   const [syncStatus, setSyncStatus] = useState("connessione"); // connessione | pronto | in-corso | offline
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  /* Controlla periodicamente (e ogni volta che si torna su questa scheda)
+     se è stata pubblicata una versione più recente dell'app, confrontando
+     con un piccolo file che GitHub Actions rigenera ad ogni build. Evita
+     di dover spiegare agli utenti come fare un "refresh forzato" a mano. */
+  useEffect(() => {
+    function checkForUpdate() {
+      fetch(`./version.json?t=${Date.now()}`, { cache: "no-store" })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.version && data.version !== CURRENT_APP_VERSION) {
+            setUpdateAvailable(true);
+          }
+        })
+        .catch(() => {}); // se il file non c'è (es. in sviluppo locale), ignora silenziosamente
+    }
+    checkForUpdate();
+    const interval = setInterval(checkForUpdate, 2 * 60 * 1000); // ogni 2 minuti
+    function onVisible() {
+      if (document.visibilityState === "visible") checkForUpdate();
+    }
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, []);
   const [lastSyncAt, setLastSyncAt] = useState(null);
   const didLoadRef = useRef(false);
 
@@ -1489,6 +1523,24 @@ export default function App() {
           </div>
         )}
       </div>
+
+      {updateAvailable && (
+        <div
+          style={{
+            position: "fixed", top: 0, left: 0, right: 0, zIndex: 100,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 14,
+            background: TOKENS.amber, color: "#1A1A1A", padding: "10px 16px", fontSize: 15, fontWeight: 700,
+          }}
+        >
+          È disponibile una versione più recente di SkySportGear.
+          <button
+            onClick={() => window.location.reload()}
+            style={{ background: "#1A1A1A", color: TOKENS.amber, border: "none", borderRadius: 6, padding: "6px 14px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}
+          >
+            Aggiorna ora
+          </button>
+        </div>
+      )}
 
       {toast && (
         <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", background: TOKENS.panelRaised, border: `1px solid ${TOKENS.amber}`, color: TOKENS.text, padding: "10px 18px", borderRadius: 8, fontSize: 18, boxShadow: "0 8px 24px rgba(0,0,0,0.4)" }}>
