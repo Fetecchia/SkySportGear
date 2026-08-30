@@ -59,6 +59,13 @@ const CATEGORY_META = {
    (es. "camera"), per evitare confusione a chi modifica il file. Questa
    mappatura permette di riconoscere la categoria in fase di importazione
    sia dall'etichetta che, per tolleranza, dalla vecchia chiave tecnica. */
+/* Genera un ID univoco: timestamp + parte casuale, per evitare collisioni
+   quando due elementi vengono creati nello stesso millisecondo (es. un
+   doppio click accidentale su un pulsante "Assegna"/"Aggiungi"). */
+function uid(prefix) {
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 const CATEGORY_LABEL_TO_KEY = Object.fromEntries(
   Object.entries(CATEGORY_META).map(([key, meta]) => [meta.label.toLowerCase(), key])
 );
@@ -1111,7 +1118,15 @@ export default function App() {
       if (!name.trim() || !fromDate) { showToast("Dai un nome all'evento e una data di inizio."); return; }
       const camId = forCameramanId || eventForm.cameramanId;
       if (!camId) { showToast("Scegli il cameraman."); return; }
-      targetEventId = "ev-" + Date.now();
+
+      const from = toDateTime(fromDate, fromTime, "00:00");
+      const to = toDateTime(toDate || fromDate, toTime, "23:59");
+      if (from && to && to < from) {
+        showToast("La data/ora di fine non può essere prima di quella di inizio.");
+        return;
+      }
+
+      targetEventId = uid("ev");
       setEvents((prev) => [...prev, {
         id: targetEventId, name: name.trim(), cameramanId: camId,
         fromDate, fromTime: fromTime || "00:00",
@@ -1122,14 +1137,14 @@ export default function App() {
       return;
     }
 
-    const assignId = "a-" + Date.now();
+    const assignId = uid("a");
     setAssignments((prev) => [...prev, { id: assignId, itemId, eventId: targetEventId }]);
     setEventForm(emptyEventForm);
     showToast("Materiale assegnato all'evento.");
   }
 
   function addItemToEvent(eventId, itemId) {
-    const assignId = "a-" + Date.now();
+    const assignId = uid("a");
     setAssignments((prev) => [...prev, { id: assignId, itemId, eventId }]);
     showToast("Materiale aggiunto all'evento.");
   }
@@ -1252,7 +1267,7 @@ export default function App() {
 
   function addCameraman() {
     if (!newCameraman.trim()) return;
-    setCameramen((prev) => [...prev, { id: "cm-" + Date.now(), name: newCameraman.trim() }]);
+    setCameramen((prev) => [...prev, { id: uid("cm"), name: newCameraman.trim() }]);
     setNewCameraman("");
     showToast("Cameraman aggiunto.");
   }
