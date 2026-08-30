@@ -1008,6 +1008,31 @@ export default function App() {
   }
 
   function deleteEvent(eventId) {
+    const event = events.find((e) => e.id === eventId);
+    if (!event) return;
+
+    if (role === "cameraman") {
+      const ok = window.confirm(`Vuoi davvero eliminare l'evento "${event.name}"? Il materiale assegnato tornerà disponibile.`);
+      if (!ok) return;
+    } else {
+      const r = eventRange(event);
+      const now = new Date();
+      const isOngoing = r.from && r.to && r.from <= now && now <= r.to;
+      const isFuture = r.from && r.from > now;
+      if (isOngoing) {
+        const ok = window.confirm(
+          `Attenzione: l'evento "${event.name}" è attualmente IN CORSO.\n\nSei sicuro di volerlo eliminare? Il materiale assegnato tornerà disponibile immediatamente.`
+        );
+        if (!ok) return;
+      } else if (isFuture) {
+        const ok = window.confirm(
+          `L'evento "${event.name}" è programmato per il futuro (${formatEventWhen(event)}).\n\nSei sicuro di volerlo eliminare?`
+        );
+        if (!ok) return;
+      }
+      // evento già concluso: nessuna conferma richiesta
+    }
+
     setAssignments((prev) => prev.filter((a) => a.eventId !== eventId));
     setEvents((prev) => prev.filter((e) => e.id !== eventId));
     showToast("Evento chiuso, materiale rientrato.");
@@ -1099,7 +1124,16 @@ export default function App() {
   }
 
   function deleteCameraman(id) {
-    const theirEventIds = events.filter((e) => e.cameramanId === id).map((e) => e.id);
+    const theirEvents = events.filter((e) => e.cameramanId === id);
+    if (theirEvents.length > 0) {
+      const cam = cameramen.find((c) => c.id === id);
+      const elenco = theirEvents.map((e) => `"${e.name}"`).join(", ");
+      const ok = window.confirm(
+        `Attenzione: ${cam?.name || "questo cameraman"} ha ${theirEvents.length} evento/i assegnato/i (${elenco}).\n\nEliminandolo, questi eventi verranno chiusi e il relativo materiale tornerà disponibile.\n\nVuoi procedere comunque?`
+      );
+      if (!ok) return;
+    }
+    const theirEventIds = theirEvents.map((e) => e.id);
     setAssignments((prev) => prev.filter((a) => !theirEventIds.includes(a.eventId)));
     setEvents((prev) => prev.filter((e) => e.cameramanId !== id));
     const remaining = cameramen.filter((c) => c.id !== id);
