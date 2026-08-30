@@ -240,7 +240,7 @@ function EventBar({ bar, style, materialForEvent }) {
           cursor: "default",
         }}
       >
-        {bar.event.name} · {bar.cameraman}
+        {bar.event.name} · {bar.cameraman || "nessun cameraman"}
       </div>
 
       {hover && (
@@ -256,10 +256,17 @@ function EventBar({ bar, style, materialForEvent }) {
             <div style={{ width: 9, height: 9, borderRadius: 3, background: color }} />
             <div style={{ fontWeight: 700, fontSize: 18 }}>{bar.event.name}</div>
           </div>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginBottom: 9, padding: "3px 9px", background: `${color}22`, border: `1px solid ${color}55`, borderRadius: 20 }}>
-            <Users size={12} color={color} />
-            <span style={{ fontSize: 14, fontWeight: 700, color: TOKENS.text }}>{bar.cameraman}</span>
-          </div>
+          {bar.cameraman ? (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginBottom: 9, padding: "3px 9px", background: `${color}22`, border: `1px solid ${color}55`, borderRadius: 20 }}>
+              <Users size={12} color={color} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: TOKENS.text }}>{bar.cameraman}</span>
+            </div>
+          ) : (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginBottom: 9, padding: "3px 9px", background: `${TOKENS.red}22`, border: `1px solid ${TOKENS.red}55`, borderRadius: 20 }}>
+              <AlertTriangle size={12} color={TOKENS.red} />
+              <span style={{ fontSize: 14, fontWeight: 700, color: TOKENS.red }}>Cameraman non assegnato</span>
+            </div>
+          )}
           {material.length === 0 ? (
             <div style={{ fontSize: 15, color: TOKENS.textMute }}>Nessun materiale assegnato.</div>
           ) : (
@@ -484,10 +491,15 @@ function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddI
             <div style={{ width: 11, height: 11, borderRadius: 3, background: color, flexShrink: 0 }} title="Colore evento nel calendario" />
             <span style={{ fontSize: 20, fontWeight: 700 }}>{event.name}</span>
           </div>
-          {cameramanLabel && (
+          {cameramanLabel ? (
             <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "3px 9px", background: `${color}22`, border: `1px solid ${color}55`, borderRadius: 20 }}>
               <Users size={13} color={color} />
               <span style={{ fontSize: 15, fontWeight: 700, color: TOKENS.text }}>{cameramanLabel}</span>
+            </div>
+          ) : (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "3px 9px", background: `${TOKENS.red}22`, border: `1px solid ${TOKENS.red}55`, borderRadius: 20 }}>
+              <AlertTriangle size={13} color={TOKENS.red} />
+              <span style={{ fontSize: 15, fontWeight: 700, color: TOKENS.red }}>Cameraman non assegnato</span>
             </div>
           )}
           <div style={{ fontSize: 17, color: TOKENS.textMute, marginTop: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -860,7 +872,7 @@ export default function App() {
     setTimeout(() => setToast(null), 2500);
   }
 
-  const cameramanName = (id) => cameramen.find((c) => c.id === id)?.name || "—";
+  const cameramanName = (id) => cameramen.find((c) => c.id === id)?.name || null;
 
   function itemsForEvent(eventId) {
     return assignments
