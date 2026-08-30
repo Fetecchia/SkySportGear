@@ -439,6 +439,7 @@ function GearTag({ item, status }) {
    valori e ripubblica l'app. */
 const RESPONSABILE_PASSWORD = "sky-responsabile-2026";
 const CAMERAMAN_PASSWORD = "sky-cameraman-2026";
+const ENTRAMBI_PASSWORD = "sky-entrambi-2026";
 
 function LoginScreen({ onLogin }) {
   const [password, setPassword] = useState("");
@@ -448,6 +449,7 @@ function LoginScreen({ onLogin }) {
     e.preventDefault();
     if (password === RESPONSABILE_PASSWORD) onLogin("responsabile");
     else if (password === CAMERAMAN_PASSWORD) onLogin("cameraman");
+    else if (password === ENTRAMBI_PASSWORD) onLogin("entrambi");
     else setError("Password non corretta.");
   }
 
@@ -492,7 +494,7 @@ function RoleSwitcher({ role, onLogout, cameramanId, setCameramanId, cameramen }
       >
         {role}
       </div>
-      {role === "cameraman" && cameramen.length > 0 && (
+      {(role === "cameraman" || role === "entrambi") && cameramen.length > 0 && (
         <div style={{ position: "relative" }}>
           <select
             value={cameramanId}
@@ -728,7 +730,15 @@ function EventAssignForm({ forCameramanId, eventsPool, cameramen, cameramanName,
 --------------------------------------------------------- */
 /* Database condiviso (Firebase Realtime Database): qui vengono letti e
    scritti i dati reali, visibili a tutti quelli che usano l'app. */
-const FIREBASE_DATA_URL = "https://skysportgear-default-rtdb.europe-west1.firebasedatabase.app/skysportgear.json";
+const FIREBASE_BASE = "https://skysportgear-default-rtdb.europe-west1.firebasedatabase.app";
+const FIREBASE_DATA_URL = `${FIREBASE_BASE}/skysportgear.json`;
+const FIREBASE_PRESENCE_URL = `${FIREBASE_BASE}/presence.json`;
+function presenceSessionUrl(sessionId) {
+  return `${FIREBASE_BASE}/presence/${sessionId}.json`;
+}
+const PRESENCE_HEARTBEAT_MS = 15000; // ogni quanto segnalare "sono ancora qui"
+const PRESENCE_STALE_MS = 45000; // dopo quanto una sessione senza segnale non viene più contata come online
+const PRESENCE_CLEANUP_MS = 5 * 60 * 1000; // dopo quanto una voce "morta" viene ripulita dal database
 
 /* Valorizzata da Vite al momento della build (vedi vite.config.js e il
    workflow GitHub Actions), è diversa ad ogni pubblicazione. Serve per
@@ -780,6 +790,68 @@ export default function App() {
   function handleLogout() {
     setAuthRole(null);
   }
+
+  const sessionIdRef = useRef(null);
+  if (!sessionIdRef.current) {
+    sessionIdRef.current = "s-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
+  }
+  const [presenceCounts, setPresenceCounts] = useState({ responsabile: 0, cameraman: 0, entrambi: 0 });
+
+  /* Finché si è autenticati, invia periodicamente un "battito" con il
+     proprio ruolo, e legge quelli di tutti per contare le sessioni attive
+     di recente (una sessione senza battito da un po' non viene più
+     conteggiata, come se si fosse disconnessa). Ripulisce anche le voci
+     molto vecchie, per non far crescere il database all'infinito. */
+  useEffect(() => {
+    if (!role) return;
+    const sessionId = sessionIdRef.current;
+
+    function sendHeartbeat() {
+      fetch(presenceSessionUrl(sessionId), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role, lastSeen: Date.now() }),
+      }).catch(() => {});
+    }
+
+    function refreshCounts() {
+      fetch(FIREBASE_PRESENCE_URL)
+        .then((res) => res.json())
+        .then((all) => {
+          if (!all) { setPresenceCounts({ responsabile: 0, cameraman: 0, entrambi: 0 }); return; }
+          const now = Date.now();
+          const counts = { responsabile: 0, cameraman: 0, entrambi: 0 };
+          Object.entries(all).forEach(([sid, entry]) => {
+            if (!entry || !entry.lastSeen) return;
+            const age = now - entry.lastSeen;
+            if (age <= PRESENCE_STALE_MS && (entry.role === "responsabile" || entry.role === "cameraman" || entry.role === "entrambi")) {
+              counts[entry.role]++;
+            }
+            if (age > PRESENCE_CLEANUP_MS) {
+              fetch(presenceSessionUrl(sid), { method: "DELETE" }).catch(() => {});
+            }
+          });
+          setPresenceCounts(counts);
+        })
+        .catch(() => {});
+    }
+
+    sendHeartbeat();
+    refreshCounts();
+    const interval = setInterval(() => { sendHeartbeat(); refreshCounts(); }, PRESENCE_HEARTBEAT_MS);
+
+    function removeOwnPresence() {
+      fetch(presenceSessionUrl(sessionId), { method: "DELETE" }).catch(() => {});
+    }
+    window.addEventListener("beforeunload", removeOwnPresence);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("beforeunload", removeOwnPresence);
+      removeOwnPresence();
+    };
+  }, [role]);
+
   const [cameramanId, setCameramanId] = useState(INITIAL_CAMERAMEN[0].id);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
@@ -1204,7 +1276,7 @@ export default function App() {
     showToast("Cameraman eliminato, suoi eventi chiusi.");
   }
 
-  const canManage = role === "responsabile";
+  const canManage = role === "responsabile" || role === "entrambi";
   const myEvents = events.filter((e) => e.cameramanId === cameramanId);
 
   if (!role) {
@@ -1212,12 +1284,12 @@ export default function App() {
   }
 
   const NAV = [
-    { key: "dashboard", label: "Dashboard", icon: LayoutGrid, roles: ["responsabile", "cameraman"] },
-    { key: "calendario", label: "Calendario", icon: CalendarDays, roles: ["responsabile", "cameraman"] },
-    { key: "materiale", label: "Materiale", icon: Package, roles: ["responsabile"] },
-    { key: "eventi", label: "Eventi", icon: ClipboardList, roles: ["responsabile"] },
-    { key: "cameramen", label: "Cameraman", icon: Users, roles: ["responsabile"] },
-    { key: "mie", label: "I miei eventi", icon: Folder, roles: ["cameraman"] },
+    { key: "dashboard", label: "Dashboard", icon: LayoutGrid, roles: ["responsabile", "cameraman", "entrambi"] },
+    { key: "calendario", label: "Calendario", icon: CalendarDays, roles: ["responsabile", "cameraman", "entrambi"] },
+    { key: "materiale", label: "Materiale", icon: Package, roles: ["responsabile", "entrambi"] },
+    { key: "eventi", label: "Eventi", icon: ClipboardList, roles: ["responsabile", "entrambi"] },
+    { key: "cameramen", label: "Cameraman", icon: Users, roles: ["responsabile", "entrambi"] },
+    { key: "mie", label: "I miei eventi", icon: Folder, roles: ["cameraman", "entrambi"] },
   ];
   const visibleNav = NAV.filter((n) => n.roles.includes(role));
   const activeTab = visibleNav.some((n) => n.key === tab) ? tab : visibleNav[0].key;
@@ -1233,6 +1305,12 @@ export default function App() {
           </div>
           <div style={{ fontSize: 21, fontWeight: 800, marginTop: 6, letterSpacing: "-0.01em" }}>SkySportGear</div>
           <div style={{ fontSize: 16, color: TOKENS.textMute, marginTop: 2 }}>gestione materiale</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 13, color: TOKENS.textMute, flexWrap: "wrap" }}>
+            <Users size={13} />
+            <span>
+              <span style={{ color: TOKENS.teal, fontWeight: 700 }}>{presenceCounts.responsabile}</span> resp. · <span style={{ color: TOKENS.amber, fontWeight: 700 }}>{presenceCounts.cameraman}</span> cam. · <span style={{ color: TOKENS.red, fontWeight: 700 }}>{presenceCounts.entrambi}</span> entrambi online
+            </span>
+          </div>
         </div>
         {visibleNav.map((n) => (
           <NavButton key={n.key} active={activeTab === n.key} onClick={() => { setTab(n.key); setEventForm(emptyEventForm); }} icon={n.icon} label={n.label} />
@@ -1273,7 +1351,7 @@ export default function App() {
           <div>
             <div style={{ fontSize: 25, fontWeight: 800 }}>{visibleNav.find((n) => n.key === activeTab)?.label}</div>
             <div style={{ fontSize: 17.5, color: TOKENS.textMute, marginTop: 2 }}>
-              {role === "cameraman" ? `Visualizzazione come ${cameramanName(cameramanId)}` : `Visualizzazione: ${role}`}
+              {(role === "cameraman" || role === "entrambi") ? `Visualizzazione come ${cameramanName(cameramanId)} (${role})` : `Visualizzazione: ${role}`}
             </div>
           </div>
           <RoleSwitcher role={role} onLogout={handleLogout} cameramanId={cameramanId} setCameramanId={setCameramanId} cameramen={cameramen} />
@@ -1547,7 +1625,7 @@ export default function App() {
         )}
 
         {/* ---------------- CAMERAMEN ---------------- */}
-        {activeTab === "cameramen" && role === "responsabile" && (
+        {activeTab === "cameramen" && (role === "responsabile" || role === "entrambi") && (
           <div>
             <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
               <input placeholder="Nome cameraman" value={newCameraman} onChange={(e) => setNewCameraman(e.target.value)}
@@ -1583,7 +1661,7 @@ export default function App() {
         )}
 
         {/* ---------------- I MIEI EVENTI (cameraman) ---------------- */}
-        {activeTab === "mie" && role === "cameraman" && (
+        {activeTab === "mie" && (role === "cameraman" || role === "entrambi") && (
           <div>
             {cameramen.length === 0 ? (
               <div style={{ color: TOKENS.textMute, fontSize: 18.5 }}>Nessun cameraman registrato.</div>
