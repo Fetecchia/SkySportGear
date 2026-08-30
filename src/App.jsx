@@ -432,25 +432,68 @@ function GearTag({ item, status }) {
   );
 }
 
-function RoleSwitcher({ role, setRole, cameramanId, setCameramanId, cameramen }) {
+/* Password condivise per ruolo — non sono una vera misura di sicurezza
+   (chiunque sappia leggere il codice del sito le trova), servono solo ad
+   evitare accessi/errori casuali (es. un cameraman che clicca per sbaglio
+   su "Responsabile"). Per cambiarle, modifica semplicemente questi due
+   valori e ripubblica l'app. */
+const RESPONSABILE_PASSWORD = "sky-responsabile-2026";
+const CAMERAMAN_PASSWORD = "sky-cameraman-2026";
+
+function LoginScreen({ onLogin }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (password === RESPONSABILE_PASSWORD) onLogin("responsabile");
+    else if (password === CAMERAMAN_PASSWORD) onLogin("cameraman");
+    else setError("Password non corretta.");
+  }
+
   return (
-    <div style={{ display: "flex", gap: 4, background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: 4, alignItems: "center" }}>
-      {["responsabile", "cameraman"].map((r) => (
+    <div style={{ minHeight: 600, display: "flex", alignItems: "center", justifyContent: "center", background: TOKENS.bg, borderRadius: 10, border: `1px solid ${TOKENS.line}` }}>
+      <form
+        onSubmit={handleSubmit}
+        style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 12, padding: 32, width: 320, display: "flex", flexDirection: "column", gap: 14 }}
+      >
+        <div style={{ textAlign: "center", marginBottom: 6 }}>
+          <div style={{ fontSize: 24, fontWeight: 800, color: TOKENS.text }}>SkySportGear</div>
+          <div style={{ fontSize: 15, color: TOKENS.textMute, marginTop: 4 }}>Inserisci la password per accedere</div>
+        </div>
+        <input
+          type="password"
+          autoFocus
+          value={password}
+          onChange={(e) => { setPassword(e.target.value); setError(""); }}
+          placeholder="Password"
+          style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: "10px 12px", color: TOKENS.text, fontSize: 16 }}
+        />
+        {error && <div style={{ color: TOKENS.red, fontSize: 14 }}>{error}</div>}
         <button
-          key={r}
-          onClick={() => setRole(r)}
-          style={{
-            padding: "7px 14px", borderRadius: 6, border: "none", fontSize: 18, fontWeight: 600,
-            textTransform: "capitalize", cursor: "pointer",
-            background: role === r ? TOKENS.amber : "transparent",
-            color: role === r ? "#1A1A1A" : TOKENS.textMute, transition: "all .15s",
-          }}
+          type="submit"
+          style={{ background: TOKENS.amber, color: "#1A1A1A", border: "none", borderRadius: 8, padding: "10px 14px", fontWeight: 700, fontSize: 16, cursor: "pointer" }}
         >
-          {r}
+          Accedi
         </button>
-      ))}
+      </form>
+    </div>
+  );
+}
+
+function RoleSwitcher({ role, onLogout, cameramanId, setCameramanId, cameramen }) {
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div
+        style={{
+          padding: "7px 14px", borderRadius: 8, fontSize: 18, fontWeight: 700,
+          textTransform: "capitalize", background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, color: TOKENS.amber,
+        }}
+      >
+        {role}
+      </div>
       {role === "cameraman" && cameramen.length > 0 && (
-        <div style={{ position: "relative", marginLeft: 4 }}>
+        <div style={{ position: "relative" }}>
           <select
             value={cameramanId}
             onChange={(e) => setCameramanId(e.target.value)}
@@ -461,6 +504,13 @@ function RoleSwitcher({ role, setRole, cameramanId, setCameramanId, cameramen })
           <ChevronDown size={14} color={TOKENS.textMute} style={{ position: "absolute", right: 8, top: 9, pointerEvents: "none" }} />
         </div>
       )}
+      <button
+        onClick={onLogout}
+        title="Esci e torna alla schermata di accesso"
+        style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 6, padding: "7px 12px", fontSize: 15, cursor: "pointer" }}
+      >
+        Esci
+      </button>
     </div>
   );
 }
@@ -717,7 +767,19 @@ export default function App() {
   const [events, setEvents] = usePersistentState("skysportgear_events", INITIAL_EVENTS);
   const [assignments, setAssignments] = usePersistentState("skysportgear_assignments", INITIAL_ASSIGNMENTS);
 
-  const [role, setRole] = useState("responsabile");
+  const [authRole, setAuthRole] = useState(() => {
+    try { return window.localStorage.getItem("skysportgear_auth_role") || null; } catch { return null; }
+  });
+  useEffect(() => {
+    try {
+      if (authRole) window.localStorage.setItem("skysportgear_auth_role", authRole);
+      else window.localStorage.removeItem("skysportgear_auth_role");
+    } catch {}
+  }, [authRole]);
+  const role = authRole;
+  function handleLogout() {
+    setAuthRole(null);
+  }
   const [cameramanId, setCameramanId] = useState(INITIAL_CAMERAMEN[0].id);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
@@ -1145,6 +1207,10 @@ export default function App() {
   const canManage = role === "responsabile";
   const myEvents = events.filter((e) => e.cameramanId === cameramanId);
 
+  if (!role) {
+    return <LoginScreen onLogin={setAuthRole} />;
+  }
+
   const NAV = [
     { key: "dashboard", label: "Dashboard", icon: LayoutGrid, roles: ["responsabile", "cameraman"] },
     { key: "calendario", label: "Calendario", icon: CalendarDays, roles: ["responsabile", "cameraman"] },
@@ -1210,7 +1276,7 @@ export default function App() {
               {role === "cameraman" ? `Visualizzazione come ${cameramanName(cameramanId)}` : `Visualizzazione: ${role}`}
             </div>
           </div>
-          <RoleSwitcher role={role} setRole={setRole} cameramanId={cameramanId} setCameramanId={setCameramanId} cameramen={cameramen} />
+          <RoleSwitcher role={role} onLogout={handleLogout} cameramanId={cameramanId} setCameramanId={setCameramanId} cameramen={cameramen} />
         </div>
 
         {/* ---------------- DASHBOARD ---------------- */}
