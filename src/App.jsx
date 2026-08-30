@@ -17,9 +17,15 @@ const EVENT_PALETTE = [
 /* Colore stabile per evento (stesso colore in Calendario e nella card
    dell'evento), calcolato dall'id — non dipende dall'ordine dell'elenco */
 function getEventColor(eventId) {
-  let hash = 0;
-  for (let i = 0; i < eventId.length; i++) hash = (hash * 31 + eventId.charCodeAt(i)) >>> 0;
-  return EVENT_PALETTE[hash % EVENT_PALETTE.length];
+  // FNV-1a: distribuisce bene anche ID quasi identici (es. eventi creati a
+  // pochi millisecondi di distanza), a differenza di un hash "somma*31"
+  // che con timestamp ravvicinati produceva pattern ripetitivi.
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < eventId.length; i++) {
+    hash ^= eventId.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return EVENT_PALETTE[(hash >>> 0) % EVENT_PALETTE.length];
 }
 
 /* ---------------------------------------------------------
