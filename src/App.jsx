@@ -1471,6 +1471,7 @@ export default function App() {
                       event={ev}
                       items={itemsForEvent(ev.id)}
                       availableForThisEvent={getAvailableItems(ev.fromDate, ev.fromTime, ev.toDate, ev.toTime, ev.id)}
+                      cameramanLabel={cameramanName(ev.cameramanId)}
                       onAddItem={addItemToEvent}
                       onRemoveItem={removeItemFromEvent}
                       onDeleteEvent={deleteEvent}
