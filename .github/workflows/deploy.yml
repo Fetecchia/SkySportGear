@@ -29,8 +29,17 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Set build version
+        run: |
+          VERSION="${{ github.sha }}-$(date +%s)"
+          echo "VITE_APP_VERSION=$VERSION" >> $GITHUB_ENV
+          mkdir -p public
+          echo "{\"version\": \"$VERSION\"}" > public/version.json
+
       - name: Build
         run: npm run build
+        env:
+          VITE_APP_VERSION: ${{ env.VITE_APP_VERSION }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
