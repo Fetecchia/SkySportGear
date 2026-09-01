@@ -747,6 +747,75 @@ const PRESENCE_HEARTBEAT_MS = 15000; // ogni quanto segnalare "sono ancora qui"
 const PRESENCE_STALE_MS = 45000; // dopo quanto una sessione senza segnale non viene più contata come online
 const PRESENCE_CLEANUP_MS = 5 * 60 * 1000; // dopo quanto una voce "morta" viene ripulita dal database
 
+/* ---------------------------------------------------------
+   AUTENTICAZIONE ANONIMA FIREBASE — invisibile all'utente: l'app si
+   "presenta" da sola a Firebase con un token, così le regole del database
+   possono richiedere "auth != null" e bloccare chi tenta di leggere/
+   scrivere direttamente saltando l'app. Non ha nulla a che vedere con le
+   password Responsabile/Cameraman/Entrambi, che restano solo un cancello
+   sull'interfaccia dell'app.
+--------------------------------------------------------- */
+const FIREBASE_API_KEY = "AIzaSyALTMh6o6mYYhLcXC_qVwjslBaPUBFXDgQ";
+const FIREBASE_AUTH_STORAGE_KEY = "skysportgear_fb_auth";
+const AUTH_REFRESH_BUFFER_MS = 5 * 60 * 1000; // rinnova 5 minuti prima della scadenza
+
+let authTokenCache = { idToken: null, refreshToken: null, expiresAt: 0 };
+
+function loadAuthCacheFromStorage() {
+  try {
+    const raw = window.localStorage.getItem(FIREBASE_AUTH_STORAGE_KEY);
+    if (raw) authTokenCache = JSON.parse(raw);
+  } catch {}
+}
+function saveAuthCacheToStorage() {
+  try { window.localStorage.setItem(FIREBASE_AUTH_STORAGE_KEY, JSON.stringify(authTokenCache)); } catch {}
+}
+
+async function signInAnonymously() {
+  const res = await fetch(`https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ returnSecureToken: true }),
+  });
+  const data = await res.json();
+  if (!data.idToken) throw new Error("Accesso anonimo Firebase fallito");
+  authTokenCache = { idToken: data.idToken, refreshToken: data.refreshToken, expiresAt: Date.now() + Number(data.expiresIn) * 1000 };
+  saveAuthCacheToStorage();
+  return authTokenCache.idToken;
+}
+
+async function refreshAuthToken() {
+  const res = await fetch(`https://securetoken.googleapis.com/v1/token?key=${FIREBASE_API_KEY}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=refresh_token&refresh_token=${authTokenCache.refreshToken}`,
+  });
+  const data = await res.json();
+  if (!data.id_token) throw new Error("Rinnovo token Firebase fallito");
+  authTokenCache = { idToken: data.id_token, refreshToken: data.refresh_token, expiresAt: Date.now() + Number(data.expires_in) * 1000 };
+  saveAuthCacheToStorage();
+  return authTokenCache.idToken;
+}
+
+/* Restituisce un token valido, rinnovandolo o creandone uno nuovo se serve.
+   Va sempre chiamata (con await) subito prima di ogni chiamata a Firebase. */
+async function getValidAuthToken() {
+  if (!authTokenCache.idToken) loadAuthCacheFromStorage();
+  if (authTokenCache.idToken && Date.now() < authTokenCache.expiresAt - AUTH_REFRESH_BUFFER_MS) {
+    return authTokenCache.idToken;
+  }
+  if (authTokenCache.refreshToken) {
+    try { return await refreshAuthToken(); } catch { /* se il rinnovo fallisce, si ripiega sotto */ }
+  }
+  return await signInAnonymously();
+}
+
+/* Aggiunge il token di autenticazione a un URL di Firebase */
+function withAuth(url, token) {
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}auth=${token}`;
+}
+
 /* Valorizzata da Vite al momento della build (vedi vite.config.js e il
    workflow GitHub Actions), è diversa ad ogni pubblicazione. Serve per
    accorgersi quando è uscita una versione più recente dell'app, senza
@@ -814,33 +883,37 @@ export default function App() {
     const sessionId = sessionIdRef.current;
 
     function sendHeartbeat() {
-      fetch(presenceSessionUrl(sessionId), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role, lastSeen: Date.now() }),
+      getValidAuthToken().then((token) => {
+        fetch(withAuth(presenceSessionUrl(sessionId), token), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ role, lastSeen: Date.now() }),
+        }).catch(() => {});
       }).catch(() => {});
     }
 
     function refreshCounts() {
-      fetch(FIREBASE_PRESENCE_URL)
-        .then((res) => res.json())
-        .then((all) => {
-          if (!all) { setPresenceCounts({ responsabile: 0, cameraman: 0, entrambi: 0 }); return; }
-          const now = Date.now();
-          const counts = { responsabile: 0, cameraman: 0, entrambi: 0 };
-          Object.entries(all).forEach(([sid, entry]) => {
-            if (!entry || !entry.lastSeen) return;
-            const age = now - entry.lastSeen;
-            if (age <= PRESENCE_STALE_MS && (entry.role === "responsabile" || entry.role === "cameraman" || entry.role === "entrambi")) {
-              counts[entry.role]++;
-            }
-            if (age > PRESENCE_CLEANUP_MS) {
-              fetch(presenceSessionUrl(sid), { method: "DELETE" }).catch(() => {});
-            }
-          });
-          setPresenceCounts(counts);
-        })
-        .catch(() => {});
+      getValidAuthToken().then((token) => {
+        fetch(withAuth(FIREBASE_PRESENCE_URL, token))
+          .then((res) => res.json())
+          .then((all) => {
+            if (!all) { setPresenceCounts({ responsabile: 0, cameraman: 0, entrambi: 0 }); return; }
+            const now = Date.now();
+            const counts = { responsabile: 0, cameraman: 0, entrambi: 0 };
+            Object.entries(all).forEach(([sid, entry]) => {
+              if (!entry || !entry.lastSeen) return;
+              const age = now - entry.lastSeen;
+              if (age <= PRESENCE_STALE_MS && (entry.role === "responsabile" || entry.role === "cameraman" || entry.role === "entrambi")) {
+                counts[entry.role]++;
+              }
+              if (age > PRESENCE_CLEANUP_MS) {
+                fetch(withAuth(presenceSessionUrl(sid), token), { method: "DELETE" }).catch(() => {});
+              }
+            });
+            setPresenceCounts(counts);
+          })
+          .catch(() => {});
+      }).catch(() => {});
     }
 
     sendHeartbeat();
@@ -848,7 +921,9 @@ export default function App() {
     const interval = setInterval(() => { sendHeartbeat(); refreshCounts(); }, PRESENCE_HEARTBEAT_MS);
 
     function removeOwnPresence() {
-      fetch(presenceSessionUrl(sessionId), { method: "DELETE" }).catch(() => {});
+      getValidAuthToken().then((token) => {
+        fetch(withAuth(presenceSessionUrl(sessionId), token), { method: "DELETE" }).catch(() => {});
+      }).catch(() => {});
     }
     window.addEventListener("beforeunload", removeOwnPresence);
 
@@ -961,7 +1036,8 @@ export default function App() {
      è sempre manuale (pulsanti "Carica" e "Condividi"), mai automatica. */
   useEffect(() => {
     let cancelled = false;
-    fetch(FIREBASE_DATA_URL)
+    getValidAuthToken()
+      .then((token) => fetch(withAuth(FIREBASE_DATA_URL, token)))
       .then((res) => res.json())
       .then((remote) => {
         if (cancelled) return;
@@ -990,7 +1066,8 @@ export default function App() {
   function pullSharedData() {
     if (window.confirm("Caricare gli ultimi dati condivisi? Eventuali modifiche fatte qui e non ancora condivise andranno perse.") === false) return;
     setSyncStatus("in-corso");
-    fetch(FIREBASE_DATA_URL)
+    getValidAuthToken()
+      .then((token) => fetch(withAuth(FIREBASE_DATA_URL, token)))
       .then((res) => res.json())
       .then((remote) => {
         const n = normalizeRemote(remote);
@@ -1014,7 +1091,9 @@ export default function App() {
      invece di sovrascrivere silenziosamente. */
   function pushSharedData() {
     setSyncStatus("in-corso");
-    fetch(FIREBASE_DATA_URL)
+    let authToken = null;
+    getValidAuthToken()
+      .then((token) => { authToken = token; return fetch(withAuth(FIREBASE_DATA_URL, token)); })
       .then((res) => res.json())
       .then((remoteRaw) => {
         const remote = normalizeRemote(remoteRaw);
@@ -1031,7 +1110,7 @@ export default function App() {
           );
           return;
         }
-        return fetch(FIREBASE_DATA_URL, {
+        return fetch(withAuth(FIREBASE_DATA_URL, authToken), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ items, cameramen, events, assignments }),
