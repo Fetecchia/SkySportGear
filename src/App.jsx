@@ -4,7 +4,7 @@ import {
   Camera, Mic, Lightbulb, Plus, X, Check, AlertTriangle,
   Package, Users, ClipboardList, LayoutGrid, ChevronDown,
   Trash2, Calendar, Clock, Search, Folder, CalendarDays,
-  Battery, Triangle, Joystick, Aperture, Rows3, StickyNote
+  Battery, Triangle, Joystick, Aperture, Rows3, StickyNote, Pencil
 } from "lucide-react";
 
 const MESI_IT = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
@@ -446,7 +446,6 @@ function GearTag({ item, status }) {
    valori e ripubblica l'app. */
 const RESPONSABILE_PASSWORD = "sky-responsabile-2026";
 const CAMERAMAN_PASSWORD = "sky-cameraman-2026";
-const ENTRAMBI_PASSWORD = "sky-entrambi-2026";
 
 function LoginScreen({ onLogin }) {
   const [password, setPassword] = useState("");
@@ -456,7 +455,6 @@ function LoginScreen({ onLogin }) {
     e.preventDefault();
     if (password === RESPONSABILE_PASSWORD) onLogin("responsabile");
     else if (password === CAMERAMAN_PASSWORD) onLogin("cameraman");
-    else if (password === ENTRAMBI_PASSWORD) onLogin("entrambi");
     else setError("Password non corretta.");
   }
 
@@ -501,13 +499,17 @@ function RoleSwitcher({ role, onLogout, cameramanId, setCameramanId, cameramen }
       >
         {role}
       </div>
-      {(role === "cameraman" || role === "entrambi") && cameramen.length > 0 && (
+      {role === "cameraman" && cameramen.length > 0 && (
         <div style={{ position: "relative" }}>
           <select
             value={cameramanId}
             onChange={(e) => setCameramanId(e.target.value)}
-            style={{ appearance: "none", background: TOKENS.panelRaised, color: TOKENS.text, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "7px 28px 7px 10px", fontSize: 18, cursor: "pointer" }}
+            style={{
+              appearance: "none", background: TOKENS.panelRaised, color: cameramanId ? TOKENS.text : TOKENS.red,
+              border: `1px solid ${cameramanId ? TOKENS.line : TOKENS.red}`, borderRadius: 6, padding: "7px 28px 7px 10px", fontSize: 18, cursor: "pointer",
+            }}
           >
+            <option value="" disabled>Seleziona cameraman…</option>
             {cameramen.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
           </select>
           <ChevronDown size={14} color={TOKENS.textMute} style={{ position: "absolute", right: 8, top: 9, pointerEvents: "none" }} />
@@ -543,9 +545,11 @@ function NavButton({ active, onClick, icon: Icon, label }) {
 }
 
 /* Card che rappresenta un evento con tutto il materiale accorpato */
-function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddItem, onRemoveItem, onDeleteEvent, readOnly }) {
+function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddItem, onRemoveItem, onDeleteEvent, onReassignCameraman, cameramenList, readOnly }) {
   const [adding, setAdding] = useState(false);
   const [pick, setPick] = useState("");
+  const [reassigning, setReassigning] = useState(false);
+  const [newCameramanId, setNewCameramanId] = useState("");
   const color = getEventColor(event.id);
 
   return (
@@ -556,17 +560,56 @@ function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddI
             <div style={{ width: 11, height: 11, borderRadius: 3, background: color, flexShrink: 0 }} title="Colore evento nel calendario" />
             <span style={{ fontSize: 20, fontWeight: 700 }}>{event.name}</span>
           </div>
-          {cameramanLabel ? (
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "3px 9px", background: `${color}22`, border: `1px solid ${color}55`, borderRadius: 20 }}>
-              <Users size={13} color={color} />
-              <span style={{ fontSize: 15, fontWeight: 700, color: TOKENS.text }}>{cameramanLabel}</span>
+
+          {!reassigning ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+              {cameramanLabel ? (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", background: `${color}22`, border: `1px solid ${color}55`, borderRadius: 20 }}>
+                  <Users size={13} color={color} />
+                  <span style={{ fontSize: 15, fontWeight: 700, color: TOKENS.text }}>{cameramanLabel}</span>
+                </div>
+              ) : (
+                <div style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 9px", background: `${TOKENS.red}22`, border: `1px solid ${TOKENS.red}55`, borderRadius: 20 }}>
+                  <AlertTriangle size={13} color={TOKENS.red} />
+                  <span style={{ fontSize: 15, fontWeight: 700, color: TOKENS.red }}>Cameraman non assegnato</span>
+                </div>
+              )}
+              {onReassignCameraman && (
+                <button
+                  onClick={() => { setNewCameramanId(""); setReassigning(true); }}
+                  title="Riassegna questo evento a un altro cameraman"
+                  style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, borderRadius: 5, color: TOKENS.textMute, padding: "4px 6px", cursor: "pointer", display: "flex" }}
+                >
+                  <Pencil size={12} />
+                </button>
+              )}
             </div>
           ) : (
-            <div style={{ display: "inline-flex", alignItems: "center", gap: 5, marginTop: 6, padding: "3px 9px", background: `${TOKENS.red}22`, border: `1px solid ${TOKENS.red}55`, borderRadius: 20 }}>
-              <AlertTriangle size={13} color={TOKENS.red} />
-              <span style={{ fontSize: 15, fontWeight: 700, color: TOKENS.red }}>Cameraman non assegnato</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6 }}>
+              <select
+                value={newCameramanId}
+                onChange={(e) => setNewCameramanId(e.target.value)}
+                style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "5px 8px", color: TOKENS.text, fontSize: 15 }}
+              >
+                <option value="">Scegli nuovo cameraman…</option>
+                {(cameramenList || []).map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+              </select>
+              <button
+                onClick={() => { if (newCameramanId) { onReassignCameraman(event.id, newCameramanId); setReassigning(false); } }}
+                disabled={!newCameramanId}
+                style={{ background: TOKENS.amber, color: "#1A1A1A", border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 14, fontWeight: 700, cursor: newCameramanId ? "pointer" : "not-allowed", opacity: newCameramanId ? 1 : 0.5 }}
+              >
+                Conferma
+              </button>
+              <button
+                onClick={() => setReassigning(false)}
+                style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 6, padding: "5px 8px", fontSize: 14, cursor: "pointer" }}
+              >
+                Annulla
+              </button>
             </div>
           )}
+
           <div style={{ fontSize: 17, color: TOKENS.textMute, marginTop: 6, display: "flex", gap: 12, flexWrap: "wrap" }}>
             <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <Calendar size={12} /> {formatEventWhen(event)}
@@ -871,7 +914,7 @@ export default function App() {
   if (!sessionIdRef.current) {
     sessionIdRef.current = "s-" + Date.now() + "-" + Math.random().toString(36).slice(2, 8);
   }
-  const [presenceCounts, setPresenceCounts] = useState({ responsabile: 0, cameraman: 0, entrambi: 0 });
+  const [presenceCounts, setPresenceCounts] = useState({ responsabile: 0, cameraman: 0 });
 
   /* Finché si è autenticati, invia periodicamente un "battito" con il
      proprio ruolo, e legge quelli di tutti per contare le sessioni attive
@@ -897,13 +940,13 @@ export default function App() {
         fetch(withAuth(FIREBASE_PRESENCE_URL, token))
           .then((res) => res.json())
           .then((all) => {
-            if (!all) { setPresenceCounts({ responsabile: 0, cameraman: 0, entrambi: 0 }); return; }
+            if (!all) { setPresenceCounts({ responsabile: 0, cameraman: 0 }); return; }
             const now = Date.now();
-            const counts = { responsabile: 0, cameraman: 0, entrambi: 0 };
+            const counts = { responsabile: 0, cameraman: 0 };
             Object.entries(all).forEach(([sid, entry]) => {
               if (!entry || !entry.lastSeen) return;
               const age = now - entry.lastSeen;
-              if (age <= PRESENCE_STALE_MS && (entry.role === "responsabile" || entry.role === "cameraman" || entry.role === "entrambi")) {
+              if (age <= PRESENCE_STALE_MS && (entry.role === "responsabile" || entry.role === "cameraman")) {
                 counts[entry.role]++;
               }
               if (age > PRESENCE_CLEANUP_MS) {
@@ -934,7 +977,21 @@ export default function App() {
     };
   }, [role]);
 
-  const [cameramanId, setCameramanId] = useState(INITIAL_CAMERAMEN[0].id);
+  const [cameramanId, setCameramanId] = useState("");
+
+  /* Ogni volta che l'elenco cameramen cambia (es. dopo il caricamento dei
+     dati condivisi da Firebase, che sostituisce quelli di esempio), se il
+     cameraman attualmente "selezionato" non esiste più in quell'elenco
+     (compreso il caso in cui non sia mai stato scelto), lo si azzera invece
+     di lasciarlo agganciato a un ID ormai inesistente — altrimenti il menu
+     a tendina mostra visivamente il primo nome della lista pur avendo
+     internamente un ID non valido, e gli eventi creati in quello stato
+     risultano "senza cameraman assegnato". */
+  useEffect(() => {
+    if (cameramanId && !cameramen.some((c) => c.id === cameramanId)) {
+      setCameramanId("");
+    }
+  }, [cameramen, cameramanId]);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
   const [materialView, setMaterialView] = useState("grid");
@@ -1266,6 +1323,11 @@ export default function App() {
     showToast("Evento chiuso, materiale rientrato.");
   }
 
+  function reassignEventCameraman(eventId, newCameramanId) {
+    setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, cameramanId: newCameramanId } : e)));
+    showToast("Cameraman dell'evento aggiornato.");
+  }
+
   function setItemManualStatus(itemId, status) {
     setItems((prev) => prev.map((i) => (i.id === itemId ? { ...i, status } : i)));
   }
@@ -1370,7 +1432,7 @@ export default function App() {
     showToast("Cameraman eliminato, suoi eventi chiusi.");
   }
 
-  const canManage = role === "responsabile" || role === "entrambi";
+  const canManage = role === "responsabile";
   const myEvents = events.filter((e) => e.cameramanId === cameramanId);
 
   if (!role) {
@@ -1378,12 +1440,12 @@ export default function App() {
   }
 
   const NAV = [
-    { key: "dashboard", label: "Dashboard", icon: LayoutGrid, roles: ["responsabile", "cameraman", "entrambi"] },
-    { key: "calendario", label: "Calendario", icon: CalendarDays, roles: ["responsabile", "cameraman", "entrambi"] },
-    { key: "materiale", label: "Materiale", icon: Package, roles: ["responsabile", "entrambi"] },
-    { key: "eventi", label: "Eventi", icon: ClipboardList, roles: ["responsabile", "entrambi"] },
-    { key: "cameramen", label: "Cameraman", icon: Users, roles: ["responsabile", "entrambi"] },
-    { key: "mie", label: "I miei eventi", icon: Folder, roles: ["cameraman", "entrambi"] },
+    { key: "dashboard", label: "Dashboard", icon: LayoutGrid, roles: ["responsabile", "cameraman"] },
+    { key: "calendario", label: "Calendario", icon: CalendarDays, roles: ["responsabile", "cameraman"] },
+    { key: "materiale", label: "Materiale", icon: Package, roles: ["responsabile"] },
+    { key: "eventi", label: "Eventi", icon: ClipboardList, roles: ["responsabile"] },
+    { key: "cameramen", label: "Cameraman", icon: Users, roles: ["responsabile"] },
+    { key: "mie", label: "I miei eventi", icon: Folder, roles: ["cameraman"] },
   ];
   const visibleNav = NAV.filter((n) => n.roles.includes(role));
   const activeTab = visibleNav.some((n) => n.key === tab) ? tab : visibleNav[0].key;
@@ -1402,7 +1464,7 @@ export default function App() {
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 13, color: TOKENS.textMute, flexWrap: "wrap" }}>
             <Users size={13} />
             <span>
-              <span style={{ color: TOKENS.teal, fontWeight: 700 }}>{presenceCounts.responsabile}</span> resp. · <span style={{ color: TOKENS.amber, fontWeight: 700 }}>{presenceCounts.cameraman}</span> cam. · <span style={{ color: TOKENS.red, fontWeight: 700 }}>{presenceCounts.entrambi}</span> entrambi online
+              <span style={{ color: TOKENS.teal, fontWeight: 700 }}>{presenceCounts.responsabile}</span> responsabile · <span style={{ color: TOKENS.amber, fontWeight: 700 }}>{presenceCounts.cameraman}</span> cameraman online
             </span>
           </div>
         </div>
@@ -1445,7 +1507,7 @@ export default function App() {
           <div>
             <div style={{ fontSize: 25, fontWeight: 800 }}>{visibleNav.find((n) => n.key === activeTab)?.label}</div>
             <div style={{ fontSize: 17.5, color: TOKENS.textMute, marginTop: 2 }}>
-              {(role === "cameraman" || role === "entrambi") ? `Visualizzazione come ${cameramanName(cameramanId)} (${role})` : `Visualizzazione: ${role}`}
+              {role === "cameraman" ? `Visualizzazione come ${cameramanName(cameramanId)}` : `Visualizzazione: ${role}`}
             </div>
           </div>
           <RoleSwitcher role={role} onLogout={handleLogout} cameramanId={cameramanId} setCameramanId={setCameramanId} cameramen={cameramen} />
@@ -1712,6 +1774,8 @@ export default function App() {
                   onAddItem={addItemToEvent}
                   onRemoveItem={removeItemFromEvent}
                   onDeleteEvent={deleteEvent}
+                  onReassignCameraman={reassignEventCameraman}
+                  cameramenList={cameramen}
                 />
               ))}
             </div>
@@ -1719,7 +1783,7 @@ export default function App() {
         )}
 
         {/* ---------------- CAMERAMEN ---------------- */}
-        {activeTab === "cameramen" && (role === "responsabile" || role === "entrambi") && (
+        {activeTab === "cameramen" && role === "responsabile" && (
           <div>
             <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
               <input placeholder="Nome cameraman" value={newCameraman} onChange={(e) => setNewCameraman(e.target.value)}
@@ -1755,7 +1819,7 @@ export default function App() {
         )}
 
         {/* ---------------- I MIEI EVENTI (cameraman) ---------------- */}
-        {activeTab === "mie" && (role === "cameraman" || role === "entrambi") && (
+        {activeTab === "mie" && role === "cameraman" && (
           <div>
             {cameramen.length === 0 ? (
               <div style={{ color: TOKENS.textMute, fontSize: 18.5 }}>Nessun cameraman registrato.</div>
