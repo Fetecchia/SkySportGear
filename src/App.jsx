@@ -1546,7 +1546,7 @@ export default function App() {
                       <div style={{ width: 8, height: 8, borderRadius: "50%", background: meta.color }} />
                       <span style={{ fontSize: 17, color: TOKENS.textMute, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>{meta.label}</span>
                     </div>
-                    <div style={{ fontSize: 37, fontWeight: 800, marginTop: 8, fontFamily: "ui-monospace, monospace" }}>{counts[key]}</div>
+                    <div style={{ fontSize: 37, fontWeight: 800, marginTop: 8, fontFamily: "ui-monospace, monospace", color: TOKENS.amber }}>{counts[key]}</div>
                   </button>
                 );
               })}
