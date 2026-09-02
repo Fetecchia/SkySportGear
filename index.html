@@ -9,6 +9,66 @@
     <title>SkySportGear</title>
     <style>
       html, body, #root { height: 100%; margin: 0; background: #17191A; }
+      * { box-sizing: border-box; }
+      body { overflow-x: hidden; }
+
+      /* ===== Adattamento a schermi stretti (smartphone) ===== */
+      @media (max-width: 768px) {
+        .ssg-app {
+          flex-direction: column !important;
+          min-height: 100vh !important;
+          border-radius: 0 !important;
+        }
+        .ssg-sidebar {
+          width: 100% !important;
+          border-right: none !important;
+          border-bottom: 1px solid #33383A;
+          padding: 12px !important;
+        }
+        .ssg-brand-block {
+          padding-bottom: 8px !important;
+        }
+        .ssg-nav-list {
+          flex-direction: row !important;
+          overflow-x: auto !important;
+          gap: 8px !important;
+          padding-bottom: 4px;
+          -webkit-overflow-scrolling: touch;
+        }
+        .ssg-nav-btn {
+          flex: 0 0 auto !important;
+          white-space: nowrap !important;
+          border-left: none !important;
+        }
+        .ssg-sidebar-bottom {
+          flex-direction: row !important;
+          flex-wrap: wrap !important;
+          align-items: center !important;
+        }
+        .ssg-main {
+          padding: 14px !important;
+        }
+        .ssg-header-row {
+          flex-direction: column !important;
+          align-items: flex-start !important;
+          gap: 10px !important;
+        }
+        .ssg-form-row {
+          flex-direction: column !important;
+          align-items: stretch !important;
+        }
+        .ssg-form-row > * {
+          width: 100% !important;
+          min-width: 0 !important;
+        }
+        .ssg-calendar-scroll {
+          overflow-x: auto !important;
+          -webkit-overflow-scrolling: touch;
+        }
+        .ssg-calendar-inner {
+          min-width: 640px !important;
+        }
+      }
     </style>
   </head>
   <body>
