@@ -556,6 +556,9 @@ function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddI
   const [reassigning, setReassigning] = useState(false);
   const [newCameramanId, setNewCameramanId] = useState("");
   const color = getEventColor(event.id);
+  const r = eventRange(event);
+  const now = new Date();
+  const isActiveNow = r.from && r.to && r.from <= now && now <= r.to;
 
   return (
     <div style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderLeft: `4px solid ${color}`, borderRadius: 8, padding: 16 }}>
@@ -564,6 +567,12 @@ function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddI
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 11, height: 11, borderRadius: 3, background: color, flexShrink: 0 }} title="Colore evento nel calendario" />
             <span style={{ fontSize: 20, fontWeight: 700 }}>{event.name}</span>
+            {isActiveNow && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", background: `${TOKENS.teal}22`, border: `1px solid ${TOKENS.teal}55`, borderRadius: 20 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: TOKENS.teal, display: "inline-block" }} />
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: TOKENS.teal, textTransform: "uppercase", letterSpacing: "0.04em" }}>Attivo</span>
+              </span>
+            )}
           </div>
 
           {!reassigning ? (
@@ -1122,6 +1131,31 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  /* Cancella automaticamente gli eventi la cui data/ora di fine è passata
+     (e le relative assegnazioni, liberando il materiale). Controlla subito
+     al caricamento e poi ogni minuto. Come ogni altra modifica, questa
+     pulizia avviene in locale: per farla vedere agli altri serve comunque
+     premere "Condividi le mie modifiche", coerentemente con il resto
+     dell'app che non sincronizza mai nulla in automatico. */
+  useEffect(() => {
+    function removeExpiredEvents() {
+      setEvents((prevEvents) => {
+        const now = new Date();
+        const stillValid = prevEvents.filter((ev) => {
+          const r = eventRange(ev);
+          return !(r.to && r.to < now);
+        });
+        if (stillValid.length === prevEvents.length) return prevEvents;
+        const validIds = new Set(stillValid.map((e) => e.id));
+        setAssignments((prevAssignments) => prevAssignments.filter((a) => validIds.has(a.eventId)));
+        return stillValid;
+      });
+    }
+    removeExpiredEvents();
+    const interval = setInterval(removeExpiredEvents, 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   /* Pulsante "Carica dati condivisi": sostituisce lo stato locale con
      l'ultima versione salvata da chiunque altro. Le modifiche locali non
      ancora condivise andrebbero perse, quindi chiede conferma. */
@@ -1232,6 +1266,18 @@ export default function App() {
       const r = eventRange(ev);
       return r.from && r.to && r.from <= now && now <= r.to;
     });
+  }
+
+  function findCurrentEventForItem(itemId) {
+    const now = new Date();
+    for (const a of assignments) {
+      if (a.itemId !== itemId) continue;
+      const ev = events.find((e) => e.id === a.eventId);
+      if (!ev) continue;
+      const r = eventRange(ev);
+      if (r.from && r.to && r.from <= now && now <= r.to) return ev;
+    }
+    return null;
   }
 
   function computeStatus(item) {
@@ -1563,11 +1609,19 @@ export default function App() {
                   </button>
                 </div>
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {items.filter((i) => computeStatus(i) === selectedDashboardStatus).map((item) => (
-                    <div key={item.id} title={item.note || undefined}>
-                      <GearChip item={item} />
-                    </div>
-                  ))}
+                  {items.filter((i) => computeStatus(i) === selectedDashboardStatus).map((item) => {
+                    const currentEvent = selectedDashboardStatus === "assegnato" ? findCurrentEventForItem(item.id) : null;
+                    return (
+                      <div key={item.id} style={{ display: "flex", alignItems: "center", gap: 6 }} title={item.note || undefined}>
+                        <GearChip item={item} />
+                        {currentEvent && (
+                          <span style={{ fontSize: 13, color: TOKENS.textMute }}>
+                            → <span style={{ color: TOKENS.amber, fontWeight: 600 }}>{currentEvent.name}</span>
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
                   {items.filter((i) => computeStatus(i) === selectedDashboardStatus).length === 0 && (
                     <span style={{ fontSize: 14, color: TOKENS.textMute }}>Nessun materiale in questo stato.</span>
                   )}
