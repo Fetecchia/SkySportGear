@@ -12,6 +12,16 @@
       * { box-sizing: border-box; }
       body { overflow-x: hidden; }
 
+      /* La barra laterale non deve allungarsi per seguire l'altezza del
+         contenuto principale (altrimenti più la Dashboard è lunga, più lo
+         spazio elastico al suo interno spinge i pulsanti in basso lontano
+         dal menù di navigazione). Vale solo su desktop: su mobile la
+         larghezza esplicita al 100% nella media query sotto prevale
+         comunque su questa regola. */
+      .ssg-sidebar {
+        align-self: flex-start;
+      }
+
       /* ===== Adattamento a schermi stretti (smartphone) ===== */
       @media (max-width: 768px) {
         .ssg-app {
