@@ -1468,8 +1468,12 @@ export default function App() {
           <div style={{ fontSize: 16, color: TOKENS.textMute, marginTop: 2 }}>gestione materiale</div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10, fontSize: 13, color: TOKENS.textMute, flexWrap: "wrap" }}>
             <Users size={13} />
-            <span>
-              <span style={{ color: TOKENS.teal, fontWeight: 700 }}>{presenceCounts.responsabile}</span> responsabile · <span style={{ color: TOKENS.amber, fontWeight: 700 }}>{presenceCounts.cameraman}</span> cameraman online
+            <span style={{ whiteSpace: "nowrap" }}>
+              <span style={{ color: TOKENS.teal, fontWeight: 700 }}>{presenceCounts.responsabile}</span> responsabile
+            </span>
+            <span>·</span>
+            <span style={{ whiteSpace: "nowrap" }}>
+              <span style={{ color: TOKENS.amber, fontWeight: 700 }}>{presenceCounts.cameraman}</span> cameraman online
             </span>
           </div>
         </div>
