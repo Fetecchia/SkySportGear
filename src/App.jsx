@@ -309,60 +309,64 @@ function MonthCalendar({ year, month, events, cameramanName, materialForEvent })
     <div style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: 16, marginBottom: 18 }}>
       <div style={{ fontSize: 26, fontWeight: 800, marginBottom: 12 }}>{MESI_IT[month]} {year}</div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 4 }}>
-        {GIORNI_IT.map((g) => (
-          <div key={g} style={{ fontSize: 16, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", padding: "2px 0" }}>
-            {g}
+      <div className="ssg-calendar-scroll">
+        <div className="ssg-calendar-inner">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 4 }}>
+            {GIORNI_IT.map((g) => (
+              <div key={g} style={{ fontSize: 16, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "center", padding: "2px 0" }}>
+                {g}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-        {weeks.map((week, wi) => {
-          const bars = computeWeekBars(week, events, cameramanName);
-          const maxRow = bars.reduce((m, b) => Math.max(m, b.rowIndex), -1);
-          return (
-            <div
-              key={wi}
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(7, 1fr)",
-                gridTemplateRows: maxRow >= 0 ? `20px repeat(${maxRow + 1}, 19px)` : "20px",
-                gap: 3,
-                position: "relative",
-                background: TOKENS.panelRaised,
-                borderRadius: 5,
-                padding: 4,
-              }}
-            >
-              {week.map((day, di) => (
+          <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            {weeks.map((week, wi) => {
+              const bars = computeWeekBars(week, events, cameramanName);
+              const maxRow = bars.reduce((m, b) => Math.max(m, b.rowIndex), -1);
+              return (
                 <div
-                  key={di}
+                  key={wi}
                   style={{
-                    gridColumn: di + 1,
-                    gridRow: 1,
-                    minWidth: 0,
-                    fontSize: 16,
-                    color: day.getMonth() === month ? TOKENS.textMute : "#55595B",
-                    fontWeight: day.getMonth() === month ? 700 : 400,
-                    textAlign: "right",
-                    paddingRight: 3,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(7, 1fr)",
+                    gridTemplateRows: maxRow >= 0 ? `20px repeat(${maxRow + 1}, 19px)` : "20px",
+                    gap: 3,
+                    position: "relative",
+                    background: TOKENS.panelRaised,
+                    borderRadius: 5,
+                    padding: 4,
                   }}
                 >
-                  {day.getDate()}
+                  {week.map((day, di) => (
+                    <div
+                      key={di}
+                      style={{
+                        gridColumn: di + 1,
+                        gridRow: 1,
+                        minWidth: 0,
+                        fontSize: 16,
+                        color: day.getMonth() === month ? TOKENS.textMute : "#55595B",
+                        fontWeight: day.getMonth() === month ? 700 : 400,
+                        textAlign: "right",
+                        paddingRight: 3,
+                      }}
+                    >
+                      {day.getDate()}
+                    </div>
+                  ))}
+                  {bars.map((bar, bi) => (
+                    <EventBar
+                      key={bi}
+                      bar={bar}
+                      materialForEvent={materialForEvent}
+                      style={{ gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`, gridRow: bar.rowIndex + 2 }}
+                    />
+                  ))}
                 </div>
-              ))}
-              {bars.map((bar, bi) => (
-                <EventBar
-                  key={bi}
-                  bar={bar}
-                  materialForEvent={materialForEvent}
-                  style={{ gridColumn: `${bar.startCol + 1} / ${bar.endCol + 2}`, gridRow: bar.rowIndex + 2 }}
-                />
-              ))}
-            </div>
-          );
-        })}
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -462,7 +466,7 @@ function LoginScreen({ onLogin }) {
     <div style={{ minHeight: 600, display: "flex", alignItems: "center", justifyContent: "center", background: TOKENS.bg, borderRadius: 10, border: `1px solid ${TOKENS.line}` }}>
       <form
         onSubmit={handleSubmit}
-        style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 12, padding: 32, width: 320, display: "flex", flexDirection: "column", gap: 14 }}
+        style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 12, padding: 32, width: "min(320px, 90vw)", display: "flex", flexDirection: "column", gap: 14 }}
       >
         <div style={{ textAlign: "center", marginBottom: 6 }}>
           <div style={{ fontSize: 24, fontWeight: 800, color: TOKENS.text }}>SkySportGear</div>
@@ -529,6 +533,7 @@ function RoleSwitcher({ role, onLogout, cameramanId, setCameramanId, cameramen }
 function NavButton({ active, onClick, icon: Icon, label }) {
   return (
     <button
+      className="ssg-nav-btn"
       onClick={onClick}
       style={{
         display: "flex", alignItems: "center", gap: 10, width: "100%", padding: "10px 12px",
@@ -707,7 +712,7 @@ function EventAssignForm({ forCameramanId, eventsPool, cameramen, cameramanName,
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+      <div className="ssg-form-row" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         {eventForm.mode === "existing" ? (
           <select
             value={eventForm.eventId}
@@ -1451,10 +1456,10 @@ export default function App() {
   const activeTab = visibleNav.some((n) => n.key === tab) ? tab : visibleNav[0].key;
 
   return (
-    <div style={{ display: "flex", minHeight: 600, background: TOKENS.bg, color: TOKENS.text, fontFamily: "'Inter','Helvetica Neue',Arial,sans-serif", borderRadius: 10, overflow: "hidden", border: `1px solid ${TOKENS.line}` }}>
+    <div className="ssg-app" style={{ display: "flex", minHeight: 600, background: TOKENS.bg, color: TOKENS.text, fontFamily: "'Inter','Helvetica Neue',Arial,sans-serif", borderRadius: 10, overflow: "hidden", border: `1px solid ${TOKENS.line}` }}>
       {/* SIDEBAR */}
-      <div style={{ width: 200, background: TOKENS.panel, borderRight: `1px solid ${TOKENS.line}`, padding: "18px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
-        <div style={{ padding: "0 8px 18px" }}>
+      <div className="ssg-sidebar" style={{ width: 200, background: TOKENS.panel, borderRight: `1px solid ${TOKENS.line}`, padding: "18px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+        <div className="ssg-brand-block" style={{ padding: "0 8px 18px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <div style={{ width: 8, height: 8, borderRadius: "50%", background: TOKENS.red }} />
             <span style={{ fontSize: 16, letterSpacing: "0.12em", color: TOKENS.textMute, fontWeight: 700 }}>ON AIR</span>
@@ -1468,42 +1473,46 @@ export default function App() {
             </span>
           </div>
         </div>
-        {visibleNav.map((n) => (
-          <NavButton key={n.key} active={activeTab === n.key} onClick={() => { setTab(n.key); setEventForm(emptyEventForm); }} icon={n.icon} label={n.label} />
-        ))}
-        <div style={{ flex: 1 }} />
-        <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 4px 8px", fontSize: 12, color: TOKENS.textMute }}>
-          <div
-            style={{
-              width: 7, height: 7, borderRadius: "50%",
-              background: syncStatus === "pronto" ? TOKENS.teal : syncStatus === "in-corso" ? TOKENS.amber : syncStatus === "offline" ? TOKENS.red : TOKENS.textMute,
-              flexShrink: 0,
-            }}
-          />
-          {syncStatus === "pronto" && lastSyncAt && `Aggiornato alle ${lastSyncAt.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`}
-          {syncStatus === "in-corso" && "Sincronizzazione…"}
-          {syncStatus === "offline" && "Offline: solo su questo dispositivo"}
-          {syncStatus === "connessione" && "Connessione…"}
+        <div className="ssg-nav-list" style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {visibleNav.map((n) => (
+            <NavButton key={n.key} active={activeTab === n.key} onClick={() => { setTab(n.key); setEventForm(emptyEventForm); }} icon={n.icon} label={n.label} />
+          ))}
         </div>
-        <button
-          onClick={pullSharedData}
-          title="Scarica gli ultimi dati condivisi da tutti (sovrascrive le modifiche locali non ancora condivise)"
-          style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, color: TOKENS.text, borderRadius: 6, padding: "8px 10px", fontSize: 13, cursor: "pointer", marginTop: 4 }}
-        >
-          ⭳ Carica dati condivisi
-        </button>
-        <button
-          onClick={pushSharedData}
-          title="Condividi le modifiche fatte qui con tutti gli altri (controlla prima eventuali conflitti sul materiale)"
-          style={{ background: TOKENS.amber, border: "none", color: "#1A1A1A", borderRadius: 6, padding: "8px 10px", fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 6 }}
-        >
-          ⭱ Condividi le mie modifiche
-        </button>
+        <div style={{ flex: 1 }} />
+        <div className="ssg-sidebar-bottom" style={{ display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 4px 8px", fontSize: 12, color: TOKENS.textMute }}>
+            <div
+              style={{
+                width: 7, height: 7, borderRadius: "50%",
+                background: syncStatus === "pronto" ? TOKENS.teal : syncStatus === "in-corso" ? TOKENS.amber : syncStatus === "offline" ? TOKENS.red : TOKENS.textMute,
+                flexShrink: 0,
+              }}
+            />
+            {syncStatus === "pronto" && lastSyncAt && `Aggiornato alle ${lastSyncAt.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" })}`}
+            {syncStatus === "in-corso" && "Sincronizzazione…"}
+            {syncStatus === "offline" && "Offline: solo su questo dispositivo"}
+            {syncStatus === "connessione" && "Connessione…"}
+          </div>
+          <button
+            onClick={pullSharedData}
+            title="Scarica gli ultimi dati condivisi da tutti (sovrascrive le modifiche locali non ancora condivise)"
+            style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, color: TOKENS.text, borderRadius: 6, padding: "8px 10px", fontSize: 13, cursor: "pointer", marginTop: 4 }}
+          >
+            ⭳ Carica dati condivisi
+          </button>
+          <button
+            onClick={pushSharedData}
+            title="Condividi le modifiche fatte qui con tutti gli altri (controlla prima eventuali conflitti sul materiale)"
+            style={{ background: TOKENS.amber, border: "none", color: "#1A1A1A", borderRadius: 6, padding: "8px 10px", fontSize: 13, fontWeight: 700, cursor: "pointer", marginTop: 6 }}
+          >
+            ⭱ Condividi le mie modifiche
+          </button>
+        </div>
       </div>
 
       {/* MAIN */}
-      <div style={{ flex: 1, padding: "20px 26px", overflow: "auto" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
+      <div className="ssg-main" style={{ flex: 1, padding: "20px 26px", overflow: "auto" }}>
+        <div className="ssg-header-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 22 }}>
           <div>
             <div style={{ fontSize: 25, fontWeight: 800 }}>{visibleNav.find((n) => n.key === activeTab)?.label}</div>
             <div style={{ fontSize: 17.5, color: TOKENS.textMute, marginTop: 2 }}>
@@ -1597,7 +1606,7 @@ export default function App() {
         {/* ---------------- MATERIALE ---------------- */}
         {activeTab === "materiale" && canManage && (
           <div>
-            <div style={{ display: "flex", gap: 10, marginBottom: 18, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+            <div className="ssg-form-row" style={{ display: "flex", gap: 10, marginBottom: 18, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
               <div style={{ position: "relative", flex: 1, maxWidth: 320 }}>
                 <Search size={14} color={TOKENS.textMute} style={{ position: "absolute", left: 10, top: 10 }} />
                 <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cerca per nome o codice…"
@@ -1648,7 +1657,7 @@ export default function App() {
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginBottom: 22, flexWrap: "wrap", background: TOKENS.panel, border: `1px dashed ${TOKENS.line}`, borderRadius: 8, padding: 12 }}>
+            <div className="ssg-form-row" style={{ display: "flex", gap: 8, marginBottom: 22, flexWrap: "wrap", background: TOKENS.panel, border: `1px dashed ${TOKENS.line}`, borderRadius: 8, padding: 12 }}>
               <input placeholder="Codice (es. CAM-030)" value={newItem.id} onChange={(e) => setNewItem({ ...newItem, id: e.target.value.toUpperCase() })}
                 style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "8px 10px", color: TOKENS.text, fontSize: 18, width: 150 }} />
               <input placeholder="Nome / modello" value={newItem.name} onChange={(e) => setNewItem({ ...newItem, name: e.target.value })}
