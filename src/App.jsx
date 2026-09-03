@@ -4,7 +4,7 @@ import {
   Camera, Mic, Lightbulb, Plus, X, Check, AlertTriangle,
   Package, Users, ClipboardList, LayoutGrid, ChevronDown,
   Trash2, Calendar, Clock, Search, Folder, CalendarDays,
-  Battery, Triangle, Joystick, Aperture, Rows3, StickyNote, Pencil
+  Battery, Triangle, Joystick, Aperture, Rows3, StickyNote, Pencil, Lock, Unlock, Filter, ChevronRight
 } from "lucide-react";
 
 const MESI_IT = ["Gennaio", "Febbraio", "Marzo", "Aprile", "Maggio", "Giugno", "Luglio", "Agosto", "Settembre", "Ottobre", "Novembre", "Dicembre"];
@@ -392,19 +392,19 @@ function Tag({ color, children }) {
   );
 }
 
-function GearChip({ item, onRemove }) {
+function GearChip({ item, onRemove, conflict }) {
   const meta = CATEGORY_META[item.category];
   const Icon = meta.icon;
   return (
     <div
       style={{
         display: "flex", alignItems: "center", gap: 7,
-        background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`,
-        borderLeft: `3px solid ${meta.color}`, borderRadius: 5,
+        background: conflict ? `${TOKENS.red}18` : TOKENS.panelRaised, border: `1px solid ${conflict ? TOKENS.red : TOKENS.line}`,
+        borderLeft: `3px solid ${conflict ? TOKENS.red : meta.color}`, borderRadius: 5,
         padding: "6px 8px 6px 10px", fontSize: 17.5,
       }}
     >
-      <Icon size={13} color={meta.color} strokeWidth={2} />
+      <Icon size={13} color={conflict ? TOKENS.red : meta.color} strokeWidth={2} />
       <span style={{ fontFamily: "ui-monospace, monospace", color: TOKENS.textMute, fontSize: 16 }}>{item.id}</span>
       <span style={{ fontWeight: 600 }}>{item.name}</span>
       {onRemove && (
@@ -550,18 +550,53 @@ function NavButton({ active, onClick, icon: Icon, label }) {
 }
 
 /* Card che rappresenta un evento con tutto il materiale accorpato */
-function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddItem, onRemoveItem, onDeleteEvent, onReassignCameraman, cameramenList, readOnly }) {
-  const [adding, setAdding] = useState(false);
-  const [pick, setPick] = useState("");
-  const [reassigning, setReassigning] = useState(false);
-  const [newCameramanId, setNewCameramanId] = useState("");
+/* Riga compatta di un evento (nome + eventuale badge "Attivo"): cliccandola
+   si espande mostrando sotto la card completa con tutti i dettagli. */
+function CollapsibleEventRow({ event, cameramanLabel, ...eventCardProps }) {
+  const [expanded, setExpanded] = useState(false);
   const color = getEventColor(event.id);
   const r = eventRange(event);
   const now = new Date();
   const isActiveNow = r.from && r.to && r.from <= now && now <= r.to;
 
   return (
-    <div style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderLeft: `4px solid ${color}`, borderRadius: 8, padding: 16 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <button
+        onClick={() => setExpanded((e) => !e)}
+        style={{
+          width: "100%", display: "flex", alignItems: "center", gap: 8,
+          background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderLeft: `4px solid ${color}`,
+          borderRadius: 8, padding: "10px 14px", cursor: "pointer", textAlign: "left",
+        }}
+      >
+        <ChevronRight size={15} color={TOKENS.textMute} style={{ transform: expanded ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
+        <span style={{ fontSize: 17, fontWeight: 700, flex: 1, color: TOKENS.text }}>{event.name}</span>
+        {isActiveNow && (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", background: `${TOKENS.teal}22`, border: `1px solid ${TOKENS.teal}55`, borderRadius: 20, flexShrink: 0 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: TOKENS.teal, display: "inline-block" }} />
+            <span style={{ fontSize: 12, fontWeight: 700, color: TOKENS.teal, textTransform: "uppercase", letterSpacing: "0.04em" }}>Attivo</span>
+          </span>
+        )}
+      </button>
+      {expanded && <EventCard event={event} cameramanLabel={cameramanLabel} {...eventCardProps} />}
+    </div>
+  );
+}
+
+function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddItem, onRemoveItem, onDeleteEvent, onReassignCameraman, cameramenList, canEdit, readOnly, highlightConflict }) {
+  const [adding, setAdding] = useState(false);
+  const [pick, setPick] = useState("");
+  const [reassigning, setReassigning] = useState(false);
+  const [newCameramanId, setNewCameramanId] = useState("");
+  const [unlocked, setUnlocked] = useState(false);
+  const color = getEventColor(event.id);
+  const r = eventRange(event);
+  const now = new Date();
+  const isActiveNow = r.from && r.to && r.from <= now && now <= r.to;
+  const actionsAllowed = !canEdit || unlocked; // se canEdit non è richiesto (Dashboard, "I miei eventi"), le azioni restano come prima
+
+  return (
+    <div style={{ background: TOKENS.panel, border: `1px solid ${highlightConflict ? TOKENS.red : TOKENS.line}`, borderLeft: `4px solid ${color}`, borderRadius: 8, padding: 16, boxShadow: highlightConflict ? `0 0 0 1px ${TOKENS.red}` : "none" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -571,6 +606,12 @@ function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddI
               <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", background: `${TOKENS.teal}22`, border: `1px solid ${TOKENS.teal}55`, borderRadius: 20 }}>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: TOKENS.teal, display: "inline-block" }} />
                 <span style={{ fontSize: 12.5, fontWeight: 700, color: TOKENS.teal, textTransform: "uppercase", letterSpacing: "0.04em" }}>Attivo</span>
+              </span>
+            )}
+            {highlightConflict && (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 5, padding: "2px 8px", background: `${TOKENS.red}22`, border: `1px solid ${TOKENS.red}55`, borderRadius: 20 }}>
+                <AlertTriangle size={12} color={TOKENS.red} />
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: TOKENS.red, textTransform: "uppercase", letterSpacing: "0.04em" }}>Conflitto</span>
               </span>
             )}
           </div>
@@ -588,7 +629,7 @@ function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddI
                   <span style={{ fontSize: 15, fontWeight: 700, color: TOKENS.red }}>Cameraman non assegnato</span>
                 </div>
               )}
-              {onReassignCameraman && (
+              {onReassignCameraman && actionsAllowed && (
                 <button
                   onClick={() => { setNewCameramanId(""); setReassigning(true); }}
                   title="Riassegna questo evento a un altro cameraman"
@@ -630,21 +671,35 @@ function EventCard({ event, items, availableForThisEvent, cameramanLabel, onAddI
             </span>
           </div>
         </div>
-        {!readOnly && onDeleteEvent && (
-          <button onClick={() => onDeleteEvent(event.id)} title="Elimina evento e libera il materiale" style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, borderRadius: 5, color: TOKENS.red, padding: "5px 8px", cursor: "pointer" }}>
-            <Trash2 size={13} />
-          </button>
-        )}
+        <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+          {canEdit && (
+            <button
+              onClick={() => setUnlocked((u) => !u)}
+              title={unlocked ? "Blocca di nuovo questo evento" : "Sblocca per poter modificare questo evento (elimina, riassegna, materiale)"}
+              style={{
+                background: unlocked ? `${TOKENS.amber}22` : "transparent", border: `1px solid ${unlocked ? TOKENS.amber : TOKENS.line}`,
+                borderRadius: 5, color: unlocked ? TOKENS.amber : TOKENS.textMute, padding: "5px 8px", cursor: "pointer", display: "flex",
+              }}
+            >
+              {unlocked ? <Unlock size={13} /> : <Lock size={13} />}
+            </button>
+          )}
+          {!readOnly && onDeleteEvent && actionsAllowed && (
+            <button onClick={() => onDeleteEvent(event.id)} title="Elimina evento e libera il materiale" style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, borderRadius: 5, color: TOKENS.red, padding: "5px 8px", cursor: "pointer" }}>
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
       </div>
 
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
         {items.length === 0 && <span style={{ fontSize: 17.5, color: TOKENS.textMute }}>Nessun materiale in questo evento.</span>}
         {items.map(({ assignment, item }) => (
-          <GearChip key={assignment.id} item={item} onRemove={readOnly ? null : () => onRemoveItem(assignment.id)} />
+          <GearChip key={assignment.id} item={item} conflict={highlightConflict} onRemove={readOnly || !actionsAllowed ? null : () => onRemoveItem(assignment.id)} />
         ))}
       </div>
 
-      {!readOnly && onAddItem && (
+      {!readOnly && onAddItem && actionsAllowed && (
         <div style={{ marginTop: 12 }}>
           {!adding ? (
             <button onClick={() => setAdding(true)} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: `1px dashed ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 6, padding: "6px 10px", fontSize: 17, cursor: "pointer" }}>
@@ -1008,11 +1063,16 @@ export default function App() {
   }, [cameramen, cameramanId]);
   const [tab, setTab] = useState("dashboard");
   const [search, setSearch] = useState("");
-  const [materialView, setMaterialView] = useState("grid");
+  const [materialView, setMaterialView] = useState("list");
   const excelInputRef = useRef(null);
   const [selectedDashboardStatus, setSelectedDashboardStatus] = useState(null);
+  const [filterCameramanId, setFilterCameramanId] = useState("");
+  const [filterItemId, setFilterItemId] = useState("");
+  const [filterDateFrom, setFilterDateFrom] = useState("");
+  const [filterDateTo, setFilterDateTo] = useState("");
   const [newItem, setNewItem] = useState({ id: "", name: "", category: "camera" });
   const [newCameraman, setNewCameraman] = useState("");
+  const [expandedCameramanId, setExpandedCameramanId] = useState(null);
   const [toast, setToast] = useState(null);
 
   const emptyEventForm = { mode: "new", eventId: "", name: "", cameramanId: "", fromDate: "", fromTime: "", toDate: "", toTime: "", itemId: "" };
@@ -1048,6 +1108,7 @@ export default function App() {
     };
   }, []);
   const [lastSyncAt, setLastSyncAt] = useState(null);
+  const [conflictEventIds, setConflictEventIds] = useState(new Set());
   const didLoadRef = useRef(false);
 
   /* Legge un blocco dati da Firebase, trattando in modo esplicito le liste
@@ -1074,6 +1135,7 @@ export default function App() {
     const localEventsById = new Map(events.map((e) => [e.id, e]));
     const remoteEventsById = new Map(remoteEvents.map((e) => [e.id, e]));
 
+    // Conflitti sul MATERIALE: stesso pezzo assegnato a due eventi diversi con date sovrapposte
     assignments.forEach((localA) => {
       const localEvent = localEventsById.get(localA.eventId);
       if (!localEvent) return;
@@ -1086,9 +1148,11 @@ export default function App() {
         if (!remoteEvent) return;
         const remoteRange = eventRange(remoteEvent);
         if (rangesOverlap(localRange.from, localRange.to, remoteRange.from, remoteRange.to)) {
-          const already = conflicts.some((c) => c.itemId === localA.itemId && c.remoteEventId === remoteA.eventId);
+          const already = conflicts.some((c) => c.type === "materiale" && c.itemId === localA.itemId && c.remoteEventId === remoteA.eventId && c.localEventId === localA.eventId);
           if (!already) {
             conflicts.push({
+              type: "materiale",
+              localEventId: localA.eventId,
               itemId: localA.itemId,
               itemName: items.find((i) => i.id === localA.itemId)?.name || localA.itemId,
               localEventName: localEvent.name,
@@ -1099,6 +1163,31 @@ export default function App() {
         }
       });
     });
+
+    // Conflitti sul CAMERAMAN: la stessa persona assegnata a due eventi diversi con date sovrapposte
+    events.forEach((localEvent) => {
+      if (!localEvent.cameramanId) return;
+      const localRange = eventRange(localEvent);
+      remoteEvents.forEach((remoteEvent) => {
+        if (remoteEvent.id === localEvent.id) return;
+        if (remoteEvent.cameramanId !== localEvent.cameramanId) return;
+        const remoteRange = eventRange(remoteEvent);
+        if (rangesOverlap(localRange.from, localRange.to, remoteRange.from, remoteRange.to)) {
+          const already = conflicts.some((c) => c.type === "cameraman" && c.localEventId === localEvent.id && c.remoteEventId === remoteEvent.id);
+          if (!already) {
+            conflicts.push({
+              type: "cameraman",
+              localEventId: localEvent.id,
+              cameramanLabel: cameramen.find((c) => c.id === localEvent.cameramanId)?.name || "Cameraman",
+              localEventName: localEvent.name,
+              remoteEventName: remoteEvent.name,
+              remoteEventId: remoteEvent.id,
+            });
+          }
+        }
+      });
+    });
+
     return conflicts;
   }
 
@@ -1171,6 +1260,7 @@ export default function App() {
         setCameramen(n.cameramen);
         setEvents(n.events);
         setAssignments(n.assignments);
+        setConflictEventIds(new Set());
         setSyncStatus("pronto");
         setLastSyncAt(new Date());
         showToast("Dati condivisi caricati.");
@@ -1181,10 +1271,13 @@ export default function App() {
       });
   }
 
-  /* Pulsante "Condividi le mie modifiche": prima controlla eventuali
-     conflitti di prenotazione materiale avvenuti nel frattempo su altri
-     dispositivi; se ne trova, blocca l'invio e li segnala chiaramente
-     invece di sovrascrivere silenziosamente. */
+  /* Pulsante "Condividi le mie modifiche": scarica prima automaticamente
+     l'ultima versione condivisa (senza sostituire quella locale, solo per
+     confrontarla) e controlla se nel frattempo qualcun altro ha creato un
+     conflitto — stesso materiale o stesso cameraman su date che si
+     sovrappongono. Se lo trova, blocca l'invio, NON tocca né cancella
+     l'evento locale in conflitto (resta modificabile per correggerlo), e
+     lo evidenzia visivamente in rosso nel tab Eventi. */
   function pushSharedData() {
     setSyncStatus("in-corso");
     let authToken = null;
@@ -1196,16 +1289,22 @@ export default function App() {
         const conflicts = findBookingConflicts(remote);
         if (conflicts.length > 0) {
           setSyncStatus("pronto");
+          setConflictEventIds(new Set(conflicts.map((c) => c.localEventId)));
           const details = conflicts
-            .map((c) => `• ${c.itemName} (${c.itemId}): assegnato qui a "${c.localEventName}", ma nel frattempo anche a "${c.remoteEventName}" da qualcun altro, con date che si sovrappongono`)
+            .map((c) =>
+              c.type === "materiale"
+                ? `• Materiale: ${c.itemName} (${c.itemId}) — assegnato qui a "${c.localEventName}", ma nel frattempo anche a "${c.remoteEventName}" da qualcun altro, con date che si sovrappongono`
+                : `• Cameraman: ${c.cameramanLabel} — assegnato qui a "${c.localEventName}", ma nel frattempo anche a "${c.remoteEventName}" da qualcun altro, con date che si sovrappongono`
+            )
             .join("\n");
           window.alert(
-            "Impossibile condividere: c'è un conflitto di prenotazione materiale.\n\n" +
+            "Impossibile condividere: trovato un conflitto con modifiche fatte nel frattempo da qualcun altro.\n\n" +
             details +
-            "\n\nCarica prima i dati condivisi (pulsante 'Carica dati condivisi'), correggi l'assegnazione in conflitto, poi riprova a condividere."
+            "\n\nL'evento creato qui NON è stato cancellato: è evidenziato in rosso nel tab Eventi, puoi correggerlo (es. cambiare materiale, cameraman o date) e poi riprovare a condividere."
           );
           return;
         }
+        setConflictEventIds(new Set());
         return fetch(withAuth(FIREBASE_DATA_URL, authToken), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -1245,6 +1344,9 @@ export default function App() {
     const to = toDateTime(toDate || fromDate, toTime, "23:59");
     return items.filter((i) => {
       if (i.status === "manutenzione") return false;
+      // già presente in QUESTO stesso evento: non va riproposto come "libero"
+      const alreadyInThisEvent = assignments.some((a) => a.itemId === i.id && a.eventId === excludeEventId);
+      if (alreadyInThisEvent) return false;
       const clash = assignments.some((a) => {
         if (a.itemId !== i.id) return false;
         if (a.eventId === excludeEventId) return false;
@@ -1629,14 +1731,57 @@ export default function App() {
               </div>
             )}
 
-            <div style={{ fontSize: 18, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 10 }}>
-              Eventi programmati
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+              <span style={{ fontSize: 18, fontWeight: 700, color: TOKENS.textMute, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                Eventi programmati
+              </span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {events.length === 0 && <div style={{ color: TOKENS.textMute, fontSize: 18 }}>Nessun evento attivo.</div>}
-              {events.map((ev) => (
-                <EventCard key={ev.id} event={ev} items={itemsForEvent(ev.id)} cameramanLabel={cameramanName(ev.cameramanId)} readOnly />
-              ))}
+
+            <div className="ssg-form-row" style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 14, background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: 10 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, color: TOKENS.textMute, fontSize: 14 }}>
+                <Filter size={13} /> Filtra:
+              </div>
+              <select value={filterCameramanId} onChange={(e) => setFilterCameramanId(e.target.value)} style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "6px 8px", color: TOKENS.text, fontSize: 14 }}>
+                <option value="">Tutti i cameraman</option>
+                {cameramen.map((c) => (<option key={c.id} value={c.id}>{c.name}</option>))}
+              </select>
+              <select value={filterItemId} onChange={(e) => setFilterItemId(e.target.value)} style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "6px 8px", color: TOKENS.text, fontSize: 14 }}>
+                <option value="">Tutto il materiale</option>
+                {items.map((i) => (<option key={i.id} value={i.id}>{i.id} — {i.name}</option>))}
+              </select>
+              <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} title="Dal" style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "6px 8px", color: TOKENS.text, fontSize: 14 }} />
+              <span style={{ color: TOKENS.textMute, fontSize: 13 }}>→</span>
+              <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} title="Al" style={{ background: TOKENS.panelRaised, border: `1px solid ${TOKENS.line}`, borderRadius: 6, padding: "6px 8px", color: TOKENS.text, fontSize: 14 }} />
+              {(filterCameramanId || filterItemId || filterDateFrom || filterDateTo) && (
+                <button
+                  onClick={() => { setFilterCameramanId(""); setFilterItemId(""); setFilterDateFrom(""); setFilterDateTo(""); }}
+                  style={{ background: "transparent", border: `1px solid ${TOKENS.line}`, color: TOKENS.textMute, borderRadius: 6, padding: "6px 10px", fontSize: 13, cursor: "pointer" }}
+                >
+                  Cancella filtri
+                </button>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {(() => {
+                const filteredEvents = events.filter((ev) => {
+                  if (filterCameramanId && ev.cameramanId !== filterCameramanId) return false;
+                  if (filterItemId && !assignments.some((a) => a.eventId === ev.id && a.itemId === filterItemId)) return false;
+                  if (filterDateFrom || filterDateTo) {
+                    const evR = eventRange(ev);
+                    const from = filterDateFrom ? toDateTime(filterDateFrom, "00:00", "00:00") : null;
+                    const to = filterDateTo ? toDateTime(filterDateTo, "23:59", "23:59") : null;
+                    if (from && evR.to && evR.to < from) return false;
+                    if (to && evR.from && evR.from > to) return false;
+                  }
+                  return true;
+                });
+                if (events.length === 0) return <div style={{ color: TOKENS.textMute, fontSize: 18 }}>Nessun evento attivo.</div>;
+                if (filteredEvents.length === 0) return <div style={{ color: TOKENS.textMute, fontSize: 18 }}>Nessun evento corrisponde ai filtri scelti.</div>;
+                return filteredEvents.map((ev) => (
+                  <CollapsibleEventRow key={ev.id} event={ev} items={itemsForEvent(ev.id)} cameramanLabel={cameramanName(ev.cameramanId)} readOnly />
+                ));
+              })()}
             </div>
           </div>
         )}
@@ -1843,6 +1988,8 @@ export default function App() {
                   onDeleteEvent={deleteEvent}
                   onReassignCameraman={reassignEventCameraman}
                   cameramenList={cameramen}
+                  canEdit
+                  highlightConflict={conflictEventIds.has(ev.id)}
                 />
               ))}
             </div>
@@ -1861,14 +2008,21 @@ export default function App() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 10 }}>
               {cameramen.map((c) => {
-                const evCount = events.filter((e) => e.cameramanId === c.id).length;
+                const theirEvents = events.filter((e) => e.cameramanId === c.id);
+                const expanded = expandedCameramanId === c.id;
                 return (
                   <div key={c.id} style={{ background: TOKENS.panel, border: `1px solid ${TOKENS.line}`, borderRadius: 8, padding: 14 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                      <div>
-                        <div style={{ fontWeight: 700, fontSize: 19.5 }}>{c.name}</div>
-                        <div style={{ fontSize: 17, color: TOKENS.textMute, marginTop: 4 }}>{evCount} evento/i attivo/i</div>
-                      </div>
+                      <button
+                        onClick={() => setExpandedCameramanId(expanded ? null : c.id)}
+                        style={{ background: "transparent", border: "none", padding: 0, textAlign: "left", cursor: "pointer", display: "flex", alignItems: "center", gap: 6 }}
+                      >
+                        <ChevronRight size={14} color={TOKENS.textMute} style={{ transform: expanded ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }} />
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 19.5, color: TOKENS.text }}>{c.name}</div>
+                          <div style={{ fontSize: 17, color: TOKENS.textMute, marginTop: 4 }}>{theirEvents.length} evento/i attivo/i</div>
+                        </div>
+                      </button>
                       <button
                         onClick={() => deleteCameraman(c.id)}
                         title="Elimina cameraman (chiude i suoi eventi e libera il materiale)"
@@ -1877,6 +2031,27 @@ export default function App() {
                         <Trash2 size={13} />
                       </button>
                     </div>
+                    {expanded && (
+                      <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${TOKENS.line}`, display: "flex", flexDirection: "column", gap: 6 }}>
+                        {theirEvents.length === 0 && <span style={{ fontSize: 14, color: TOKENS.textMute }}>Nessun evento assegnato.</span>}
+                        {theirEvents.map((ev) => {
+                          const evR = eventRange(ev);
+                          const now = new Date();
+                          const isActiveNow = evR.from && evR.to && evR.from <= now && now <= evR.to;
+                          const evColor = getEventColor(ev.id);
+                          return (
+                            <div key={ev.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14 }}>
+                              <div style={{ width: 8, height: 8, borderRadius: 2, background: evColor, flexShrink: 0 }} />
+                              <span style={{ flex: 1, color: TOKENS.text }}>{ev.name}</span>
+                              <span style={{ color: TOKENS.textMute, fontSize: 12.5 }}>{formatEventWhen(ev)}</span>
+                              {isActiveNow && (
+                                <span style={{ fontSize: 11, fontWeight: 700, color: TOKENS.teal, textTransform: "uppercase" }}>Attivo</span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })}
